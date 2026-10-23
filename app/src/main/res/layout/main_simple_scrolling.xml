@@ -8,6 +8,7 @@
     android:orientation="vertical">
 
     <include layout="@layout/editor_toolbar" />
+    <include layout="@layout/find_replace_bar" />
 
     <LinearLayout
         android:id="@+id/linear_layout"
