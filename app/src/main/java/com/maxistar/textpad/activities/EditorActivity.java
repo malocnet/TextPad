@@ -403,6 +403,9 @@ public class EditorActivity extends AppCompatActivity {
             } else if (keyCode == KeyEvent.KEYCODE_Y) {
                 editRedo();
                 return true;
+            } else if (keyCode == KeyEvent.KEYCODE_H) {
+                showFindReplaceDialog();
+                return true;
             }
         }
 
@@ -865,6 +868,66 @@ public class EditorActivity extends AppCompatActivity {
             searchItem.setOnActionExpandListener(getQueryTextListener());
         }
     }
+    private void showFindReplaceDialog() {
+    LinearLayout layout = new LinearLayout(this);
+    layout.setOrientation(LinearLayout.VERTICAL);
+    layout.setPadding(50, 30, 50, 10);
+
+    final EditText findInput = new EditText(this);
+    findInput.setHint("Find");
+    layout.addView(findInput);
+
+    final EditText replaceInput = new EditText(this);
+    replaceInput.setHint("Replace with");
+    layout.addView(replaceInput);
+
+    new AlertDialog.Builder(this)
+        .setTitle("Find & Replace")
+        .setView(layout)
+        .setPositiveButton("Replace All", (dialog, which) -> {
+            String findText = findInput.getText().toString();
+            String replaceText = replaceInput.getText().toString();
+            if (!findText.isEmpty()) {
+                replaceAll(findText, replaceText);
+            }
+        })
+        .setNeutralButton("Replace", (dialog, which) -> {
+            String findText = findInput.getText().toString();
+            String replaceText = replaceInput.getText().toString();
+            if (!findText.isEmpty()) {
+                replaceNext(findText, replaceText);
+            }
+        })
+        .setNegativeButton("Cancel", null)
+        .show();
+    }
+
+    private void replaceAll(String findText, String replaceText) {
+        String content = mText.getText().toString();
+        String newContent = content.replace(findText, replaceText);
+        if (!content.equals(newContent)) {
+            mText.setText(newContent);
+            showToast("Replaced all occurrences");
+        } else {
+            showToast("Text not found: " + findText);
+        }
+    }
+
+    private void replaceNext(String findText, String replaceText) {
+        String content = mText.getText().toString();
+        int cursorPos = mText.getSelectionStart();
+        int index = content.indexOf(findText, cursorPos);
+        if (index == -1) {
+            index = content.indexOf(findText);
+        }
+        if (index != -1) {
+            mText.getEditableText().replace(index, index + findText.length(), replaceText);
+            mText.setSelection(index + replaceText.length());
+            showToast("Replaced 1 occurrence");
+        } else {
+            showToast("Text not found: " + findText);
+        }
+    }
 
     @Override
     public boolean onPrepareOptionsMenu(Menu menu) {
@@ -999,6 +1062,8 @@ public class EditorActivity extends AppCompatActivity {
             openFile();
         } else if (itemId == R.id.menu_document_search) {
             initSearch(item);
+        } else if (itemId == R.id.menu_document_find_replace) {
+            showFindReplaceDialog();
         } else if (itemId == R.id.menu_document_open_last1) {
             openRecentFile(0);
         } else if (itemId == R.id.menu_document_open_last2) {
