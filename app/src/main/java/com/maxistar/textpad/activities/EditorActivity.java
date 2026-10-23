@@ -140,7 +140,7 @@ public class EditorActivity extends AppCompatActivity {
     private List<Integer> findResults = new ArrayList<>();
     private int findCurrentIndex = -1;
     private String lastFindQuery = "";
-    
+
     String urlFilename = TPStrings.EMPTY;
 
     Uri lastTriedSystemUri = null;
@@ -240,7 +240,8 @@ public class EditorActivity extends AppCompatActivity {
         });
         editTextUndoRedo = new EditTextUndoRedo(mText, this);
         setTextWatcher();
-
+        setupFindReplaceBar();
+        
         if (simpleScrolling()) {
             linearLayout = findViewById(R.id.linear_layout);
         } else {
