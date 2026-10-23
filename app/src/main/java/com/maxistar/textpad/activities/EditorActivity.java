@@ -132,7 +132,15 @@ public class EditorActivity extends AppCompatActivity {
     private EditText mText;
     private ScrollView scrollView;
     private LinearLayout linearLayout;
-
+    // Find & Replace bar
+    private LinearLayout findReplaceBar;
+    private EditText findInput;
+    private EditText replaceInput;
+    private TextView findCount;
+    private List<Integer> findResults = new ArrayList<>();
+    private int findCurrentIndex = -1;
+    private String lastFindQuery = "";
+    
     String urlFilename = TPStrings.EMPTY;
 
     Uri lastTriedSystemUri = null;
