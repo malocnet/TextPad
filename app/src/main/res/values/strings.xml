@@ -130,5 +130,12 @@
     <string name="readOnlyDialogButtonOpenAgain">Open again</string>
     <string name="readOnlyDialogButtonContinue">Continue read only</string>
 
-
+    <string name="find_replace">Find &amp; Replace</string>
+    <string name="find_hint">Find</string>
+    <string name="replace_hint">Replace with</string>
+    <string name="replace_all">Replace All</string>
+    <string name="replace_next">Replace</string>
+    <string name="replaced_all">Replaced all occurrences</string>
+    <string name="text_not_found">Text not found</string>
+    
 </resources>
