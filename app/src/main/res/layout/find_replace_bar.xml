@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/find_replace_bar"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="?android:attr/colorBackground"
+    android:elevation="4dp"
+    android:visibility="gone"
+    android:padding="4dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <EditText
+            android:id="@+id/find_input"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:hint="Find..."
+            android:singleLine="true"
+            android:paddingStart="8dp"
+            android:inputType="text" />
+
+        <TextView
+            android:id="@+id/find_count"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="0/0"
+            android:textSize="12sp"
+            android:minWidth="36dp"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp" />
+
+        <ImageButton
+            android:id="@+id/btn_find_prev"
+            android:layout_width="50dp"
+            android:layout_height="36dp"
+            android:src="@android:drawable/arrow_up_float"
+            android:contentDescription="Prev"
+            android:background="?attr/selectableItemBackgroundBorderless" />
+
+        <ImageButton
+            android:id="@+id/btn_find_next"
+            android:layout_width="50dp"
+            android:layout_height="36dp"
+            android:src="@android:drawable/ic_media_next"
+            android:contentDescription="Next"
+            android:background="?attr/selectableItemBackgroundBorderless" />
+
+        <ImageButton
+            android:id="@+id/btn_find_close"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:src="@android:drawable/ic_menu_close_clear_cancel"
+            android:contentDescription="Close"
+            android:background="?attr/selectableItemBackgroundBorderless" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="?attr/colorControlHighlight"
+        android:layout_marginTop="2dp"
+        android:layout_marginBottom="2dp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <EditText
+            android:id="@+id/replace_input"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:hint="Replace..."
+            android:singleLine="true"
+            android:paddingStart="8dp"
+            android:inputType="text" />
+
+        <Button
+            android:id="@+id/btn_replace_one"
+            android:layout_width="wrap_content"
+            android:layout_height="32dp"
+            android:text="Replace"
+            android:textSize="12sp"
+            style="@style/Widget.AppCompat.Button.Borderless" />
+
+        <Button
+            android:id="@+id/btn_replace_all"
+            android:layout_width="wrap_content"
+            android:layout_height="32dp"
+            android:text="All"
+            android:textSize="12sp"
+            style="@style/Widget.AppCompat.Button.Borderless" />
+    </LinearLayout>
+</LinearLayout>
