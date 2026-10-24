@@ -11,27 +11,19 @@
     <item
         android:id="@+id/menu_document_find_replace"
         android:title="Find &amp; Replace"
-        android:icon="@android:drawable/ic_menu_edit"
-        app:showAsAction="never" />
+        android:icon="@android:drawable/ic_find_replace"
+        app:showAsAction="ifRoom|collapseActionView" />
+        
     <item
-        android:id="@+id/action_edit"
-        android:title="@string/action_edit"
-        android:icon="@drawable/ic_edit"
-        app:iconTint="@color/colorIcon"
-        app:showAsAction="ifRoom">
-        <menu>
-            <item
-                android:id="@+id/menu_edit_undo"
-                android:title="@string/action_undo"
-                android:icon="@drawable/ic_undo"
-                app:iconTint="@color/colorIcon"/>
-            <item
-                android:id="@+id/menu_edit_redo"
-                android:title="@string/action_redo"
-                android:icon="@drawable/ic_redo"
-                app:iconTint="@color/colorIcon"/>
-        </menu>
-    </item>
+        android:id="@+id/menu_edit_undo"
+        android:title="@string/action_undo"
+        android:icon="@drawable/ic_undo"
+        app:iconTint="@color/colorIcon"/>
+    <item
+        android:id="@+id/menu_edit_redo"
+        android:title="@string/action_redo"
+        android:icon="@drawable/ic_redo"
+        app:iconTint="@color/colorIcon"/>
     <item
         android:id="@+id/menu_document_new"
         android:title="@string/New"

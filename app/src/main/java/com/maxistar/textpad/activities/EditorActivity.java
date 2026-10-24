@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import android.widget.Button;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
@@ -132,6 +133,12 @@ public class EditorActivity extends AppCompatActivity {
     private EditText mText;
     private ScrollView scrollView;
     private LinearLayout linearLayout;
+    private LinearLayout findReplaceBar;
+    private EditText findInput;
+    private EditText replaceInput;
+    private TextView findCount;
+    private List<Integer> findResults;
+    private int findCurrentIndex;
 
     String urlFilename = TPStrings.EMPTY;
 
@@ -404,7 +411,7 @@ public class EditorActivity extends AppCompatActivity {
                 editRedo();
                 return true;
             } else if (keyCode == KeyEvent.KEYCODE_H) {
-                showFindReplaceDialog();
+                showFindReplaceBar();
                 return true;
             }
         }
@@ -868,38 +875,44 @@ public class EditorActivity extends AppCompatActivity {
             searchItem.setOnActionExpandListener(getQueryTextListener());
         }
     }
+    private void setupFindReplaceBar() { /* wire up all button listeners */ }
+    private void showFindReplaceBar() { /* show the bar */ }
+    private void hideFindReplaceBar() { /* hide the bar */ }
+    private void runFindAll() { /* case-insensitive search, highlight first result */ }
+    private void findMove(int delta) { /* navigate between results */ }
+    private void highlightAndScroll() { /* highlight current match and scroll */ }
+    private void updateFindCount() { /* update x/y counter label */ }
+
     private void showFindReplaceDialog() {
-    LinearLayout layout = new LinearLayout(this);
-    layout.setOrientation(LinearLayout.VERTICAL);
-    layout.setPadding(50, 30, 50, 10);
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(50, 30, 50, 10);
 
-    final EditText findInput = new EditText(this);
-    findInput.setHint("Find");
-    layout.addView(findInput);
+        final EditText findInput = new EditText(this);
+        findInput.setHint("Find");
+        findInput.setSingleLine(true);
+        layout.addView(findInput);
 
-    final EditText replaceInput = new EditText(this);
-    replaceInput.setHint("Replace with");
-    layout.addView(replaceInput);
+        final EditText replaceInput = new EditText(this);
+        replaceInput.setHint("Replace with");
+        replaceInput.setSingleLine(true);
+        layout.addView(replaceInput);
 
-    new AlertDialog.Builder(this)
-        .setTitle("Find & Replace")
-        .setView(layout)
-        .setPositiveButton("Replace All", (dialog, which) -> {
-            String findText = findInput.getText().toString();
-            String replaceText = replaceInput.getText().toString();
-            if (!findText.isEmpty()) {
-                replaceAll(findText, replaceText);
-            }
-        })
-        .setNeutralButton("Replace", (dialog, which) -> {
-            String findText = findInput.getText().toString();
-            String replaceText = replaceInput.getText().toString();
-            if (!findText.isEmpty()) {
-                replaceNext(findText, replaceText);
-            }
-        })
-        .setNegativeButton("Cancel", null)
-        .show();
+        new AlertDialog.Builder(this)
+            .setTitle("Find & Replace")
+            .setView(layout)
+            .setPositiveButton("Replace All", (dialog, which) -> {
+                String find = findInput.getText().toString();
+                String replace = replaceInput.getText().toString();
+                if (!find.isEmpty()) replaceAll(find, replace);
+            })
+            .setNeutralButton("Replace", (dialog, which) -> {
+                String find = findInput.getText().toString();
+                String replace = replaceInput.getText().toString();
+                if (!find.isEmpty()) replaceNext(find, replace);
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
     }
 
     private void replaceAll(String findText, String replaceText) {
@@ -909,7 +922,7 @@ public class EditorActivity extends AppCompatActivity {
             mText.setText(newContent);
             showToast("Replaced all occurrences");
         } else {
-            showToast("Text not found: " + findText);
+            showToast(findText + " not found");
         }
     }
 
@@ -917,15 +930,12 @@ public class EditorActivity extends AppCompatActivity {
         String content = mText.getText().toString();
         int cursorPos = mText.getSelectionStart();
         int index = content.indexOf(findText, cursorPos);
-        if (index == -1) {
-            index = content.indexOf(findText);
-        }
+        if (index == -1) index = content.indexOf(findText); // wrap around
         if (index != -1) {
             mText.getEditableText().replace(index, index + findText.length(), replaceText);
             mText.setSelection(index + replaceText.length());
-            showToast("Replaced 1 occurrence");
         } else {
-            showToast("Text not found: " + findText);
+            showToast(findText + " not found");
         }
     }
 
@@ -1063,7 +1073,7 @@ public class EditorActivity extends AppCompatActivity {
         } else if (itemId == R.id.menu_document_search) {
             initSearch(item);
         } else if (itemId == R.id.menu_document_find_replace) {
-            showFindReplaceDialog();
+            //showFindReplaceDialog();
         } else if (itemId == R.id.menu_document_open_last1) {
             openRecentFile(0);
         } else if (itemId == R.id.menu_document_open_last2) {
@@ -2220,7 +2230,8 @@ public class EditorActivity extends AppCompatActivity {
         return Math.max(0, Math.min(value, boundedMax));
     }
 
-    // QueryTextListener
+
+
     private class QueryTextListener
             implements SearchView.OnQueryTextListener, MenuItem.OnActionExpandListener {
         private final BackgroundColorSpan span = new BackgroundColorSpan(getSearchSelectionColor());
@@ -2228,42 +2239,115 @@ public class EditorActivity extends AppCompatActivity {
         private Matcher matcher;
         private int index;
         private final int height;
+        private String currentQuery = "";
 
         public QueryTextListener() {
-            // Use regex search and spannable for highlighting
             if (simpleScrolling()) {
                 height = linearLayout.getHeight();
             } else {
                 height = scrollView.getHeight();
             }
             editable = mText.getEditableText();
+            setupReplaceBar();
         }
 
-        // onQueryTextChange
+        private void setupReplaceBar() {
+            View replaceBar = findViewById(R.id.replace_bar);
+            if (replaceBar != null) replaceBar.setVisibility(View.VISIBLE);
+            Button btnReplace = findViewById(R.id.btn_replace);
+            if (btnReplace != null) btnReplace.setOnClickListener(v -> replaceCurrentMatch());
+            Button btnReplaceAll = findViewById(R.id.btn_replace_all);
+            if (btnReplaceAll != null) btnReplaceAll.setOnClickListener(v -> replaceAllMatches());
+        }
+
+        private String getReplaceText() {
+            EditText replaceInput = findViewById(R.id.replace_input);
+            if (replaceInput == null) return "";
+            return replaceInput.getText().toString();
+        }
+
+        private void replaceCurrentMatch() {
+            if (matcher == null || currentQuery.isEmpty()) return;
+            String currentText = editable.toString();
+            try {
+                Pattern pattern = Pattern.compile(
+                    Pattern.quote(currentQuery),
+                    Pattern.MULTILINE | Pattern.CASE_INSENSITIVE
+                );
+                Matcher freshMatcher = pattern.matcher(currentText);
+                if (freshMatcher.find(index)) {
+                    int start = freshMatcher.start();
+                    int end = freshMatcher.end();
+                    String replacement = getReplaceText();
+                    editable.removeSpan(span);
+                    editable.replace(start, end, replacement);
+                    String newText = editable.toString();
+                    matcher = pattern.matcher(newText);
+                    index = start + replacement.length();
+                    if (matcher.find(index)) {
+                        doSearch();
+                    } else {
+                        index = 0;
+                        matcher.reset();
+                        if (matcher.find()) {
+                            doSearch();
+                        } else {
+                            showToast(R.string.s_not_found);
+                        }
+                    }
+                } else {
+                    onQueryTextSubmit(currentQuery);
+                }
+            } catch (Exception e) {
+                showToast(R.string.Can_not_write_file);
+            }
+        }
+
+        private void replaceAllMatches() {
+            if (currentQuery.isEmpty()) return;
+            String replacement = getReplaceText();
+            String currentText = editable.toString();
+            try {
+                Pattern pattern = Pattern.compile(
+                    Pattern.quote(currentQuery),
+                    Pattern.MULTILINE | Pattern.CASE_INSENSITIVE
+                );
+                String newText = pattern.matcher(currentText)
+                    .replaceAll(Matcher.quoteReplacement(replacement));
+                if (!newText.equals(currentText)) {
+                    editable.removeSpan(span);
+                    int cursorPos = mText.getSelectionStart();
+                    mText.setText(newText);
+                    mText.setSelection(Math.min(cursorPos, newText.length()));
+                    index = 0;
+                    matcher = null;
+                    showToast("Replaced all occurrences");
+                } else {
+                    showToast(R.string.s_not_found);
+                }
+            } catch (Exception e) {
+                showToast(R.string.Can_not_write_file);
+            }
+        }
+
         @Override
         public boolean onQueryTextChange(String newText) {
-            // Reset the index and clear highlighting
+            currentQuery = newText;
             if (newText.length() == 0) {
                 index = 0;
                 editable.removeSpan(span);
                 return false;
             }
-
-            // Check pattern
             try {
-                String escapedTextToFind = Pattern.quote(newText);
-                Pattern pattern = Pattern.compile(escapedTextToFind, Pattern.MULTILINE | Pattern.CASE_INSENSITIVE);
-                matcher = pattern.matcher(editable);
+                matcher = Pattern.compile(
+                    Pattern.quote(newText),
+                    Pattern.MULTILINE | Pattern.CASE_INSENSITIVE
+                ).matcher(editable);
             } catch (Exception e) {
                 return false;
             }
-
-            // Find text
             if (matcher.find(index)) {
-                // Check layout
-                if (mText.getLayout() == null) {
-                    return false;
-                }
+                if (mText.getLayout() == null) return false;
                 doSearch();
             } else {
                 index = 0;
@@ -2271,53 +2355,38 @@ public class EditorActivity extends AppCompatActivity {
             return true;
         }
 
-        // onQueryTextSubmit
         @Override
         public boolean onQueryTextSubmit(String query) {
-            // Find next text
+            currentQuery = query;
             if (matcher != null) {
                 if (matcher.find()) {
-                    // Check layout
-                    if (mText.getLayout() == null) {
-                        return false;
-                    }
+                    if (mText.getLayout() == null) return false;
                     doSearch();
                 } else {
                     Toast.makeText(
-                            EditorActivity.this,
-                            formatString(R.string.s_not_found, query),
-                            Toast.LENGTH_SHORT
+                        EditorActivity.this,
+                        formatString(R.string.s_not_found, query),
+                        Toast.LENGTH_SHORT
                     ).show();
                     matcher.reset();
                     index = 0;
                     editable.removeSpan(span);
                 }
             }
-
             return true;
         }
 
         private void doSearch() {
-            // Get index
             index = matcher.start();
-
-            // Get text position
             int line = mText.getLayout().getLineForOffset(index);
             int pos = mText.getLayout().getLineBaseline(line);
-
-            // Scroll to it
             if (simpleScrolling()) {
                 mText.scrollTo(0, pos - height / 2);
             } else {
                 scrollView.smoothScrollTo(0, pos - height / 2);
             }
-            // Highlight it
-            editable.setSpan(
-                    span,
-                    matcher.start(),
-                    matcher.end(),
-                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-            );
+            editable.setSpan(span, matcher.start(), matcher.end(),
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
 
         @Override
@@ -2330,6 +2399,8 @@ public class EditorActivity extends AppCompatActivity {
             editable.removeSpan(span);
             mText.requestFocus();
             queryTextListener = null;
+            View replaceBar = findViewById(R.id.replace_bar);
+            if (replaceBar != null) replaceBar.setVisibility(View.GONE);
             return true;
         }
     }
