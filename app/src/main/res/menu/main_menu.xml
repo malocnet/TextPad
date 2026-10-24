@@ -11,24 +11,27 @@
     <item
         android:id="@+id/menu_document_find_replace"
         android:title="Find &amp; Replace"
-        android:icon="@android:drawable/ic_find_replace"
+        android:icon="@drawable/ic_find_replace"
         app:showAsAction="ifRoom|collapseActionView" />
         
     <item
         android:id="@+id/menu_edit_undo"
         android:title="@string/action_undo"
         android:icon="@drawable/ic_undo"
-        app:iconTint="@color/colorIcon"/>
+        app:iconTint="@color/colorIcon"
+        app:showAsAction="ifRoom|collapseActionView"/>
     <item
         android:id="@+id/menu_edit_redo"
         android:title="@string/action_redo"
         android:icon="@drawable/ic_redo"
-        app:iconTint="@color/colorIcon"/>
+        app:iconTint="@color/colorIcon"
+        app:showAsAction="ifRoom|collapseActionView"/>
     <item
         android:id="@+id/menu_document_new"
         android:title="@string/New"
         android:icon="@drawable/ic_file"
-        app:iconTint="@color/colorIcon" />
+        app:iconTint="@color/colorIcon" 
+        app:showAsAction="ifRoom|collapseActionView"/>
     <item
         android:id="@+id/menu_document_open"
         android:title="@string/Open"
