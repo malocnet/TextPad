@@ -9,12 +9,15 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.text.DateFormat;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.text.DateFormat;
 
 import android.provider.DocumentsContract;
 import android.content.UriPermission;
@@ -86,7 +89,6 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.view.menu.MenuBuilder;
 import androidx.appcompat.widget.Toolbar;
 
-
 import android.content.DialogInterface;
 import android.text.SpannableString;
 import android.text.method.LinkMovementMethod;
@@ -95,27 +97,20 @@ import android.text.style.ClickableSpan;
 import android.view.View;
 import android.widget.TextView;
 
-import com.maxistar.textpad.TabManager;
-import com.maxistar.textpad.EditorState;
-
 public class EditorActivity extends AppCompatActivity {
-    private TabManager tabManager;
 
     private static final String STATE_FILENAME = "filename";
     private static final String STATE_CHANGED = "changed";
     private static final String STATE_CURSOR_POSITION = "cursor-position";
     private static final String STATE_CURSOR_END = "cursor-end";
     private static final String STATE_RECOVERY_KEY = "recovery-key";
+    private static final String STATE_IS_TEMP_FILE = "is-temp-file";
 
     private static final int REQUEST_OPEN = 1;
     private static final int REQUEST_SAVE = 2;
-
     private static final int REQUEST_SETTINGS = 3;
-
-
     private static final int ACTION_CREATE_FILE = 4;
     private static final int ACTION_OPEN_FILE = 5;
-
 
     private static final int DO_NOTHING = 0;
     private static final int DO_OPEN = 1;
@@ -126,6 +121,9 @@ public class EditorActivity extends AppCompatActivity {
 
     private static final String LOG_TAG = "TextEditor";
 
+    // Folder names trong simpletexteditor/
+    private static final String DIR_TEMP = "temp";
+    private static final String DIR_NOTSAVE = "notsave";
 
     String[] mimeTypes = {
             "*/*",
@@ -139,18 +137,18 @@ public class EditorActivity extends AppCompatActivity {
     private EditText mText;
     private ScrollView scrollView;
     private LinearLayout linearLayout;
-    
+
     String urlFilename = TPStrings.EMPTY;
 
     Uri lastTriedSystemUri = null;
 
-
     boolean changed = false;
-
     boolean exitDialogShown = false;
 
-    private int next_action = DO_NOTHING; // to figure out better way
+    // isTempFile = true khi file đang ở simpletexteditor/temp/ và chưa được user đặt tên thật
+    private boolean isTempFile = false;
 
+    private int next_action = DO_NOTHING;
     private String next_action_filename = "";
 
     static int selectionStart = 0;
@@ -186,17 +184,12 @@ public class EditorActivity extends AppCompatActivity {
     }
 
     SettingsService settingsService;
-
     RecentFilesService recentFilesService;
-
     AlternativeUrlsService alternativeUrlsService;
 
     private QueryTextListener queryTextListener;
-
     private TextWatcher textWatcher;
-
     EditTextUndoRedo editTextUndoRedo;
-
     WebView mWebView;
 
     private int cachedMaxHorizontalScroll = 0;
@@ -204,14 +197,133 @@ public class EditorActivity extends AppCompatActivity {
     private boolean horizontalScrollBoundsDirty = true;
     private int horizontalScrollBoundsCalculationCount = 0;
 
+    // ─────────────────────────────────────────────────────────────
+    // Temp / NoSave file helpers
+    // ─────────────────────────────────────────────────────────────
+
     /**
-     * Called when the activity is first created.
+     * Lấy root folder: getExternalFilesDir()/simpletexteditor/
+     * Dùng external để file picker / Recent Files mở lại được.
      */
+    private File getSimpleTextEditorDir() {
+        File base = getExternalFilesDir(null);
+        if (base == null) base = getFilesDir(); // fallback nếu external không available
+        return new File(base, "simpletexteditor");
+    }
+
+    /**
+     * Tạo file tạm mới trong simpletexteditor/temp/
+     * Tên: newfile-yyyyMMddHHmm-uuid.txt
+     */
+    private File createNewTempFile() {
+        String timestamp = new SimpleDateFormat("yyyyMMddHHmm", Locale.US).format(new Date());
+        String uuid = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        String name = "newfile-" + timestamp + "-" + uuid + ".txt";
+        File dir = new File(getSimpleTextEditorDir(), DIR_TEMP);
+        dir.mkdirs();
+        return new File(dir, name);
+    }
+
+    /**
+     * Tạo tên file cho notsave/ hoặc temp/ từ file đang mở.
+     * Format: basename-yyyyMMddHHmm-uuid.ext
+     * Ví dụ: notes-202410241530-a1b2c3d4.txt
+     */
+    private String buildTimestampedName(String originalName) {
+        String timestamp = new SimpleDateFormat("yyyyMMddHHmm", Locale.US).format(new Date());
+        String uuid = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        int dot = originalName.lastIndexOf('.');
+        if (dot > 0) {
+            String base = originalName.substring(0, dot);
+            String ext = originalName.substring(dot + 1);
+            return base + "-" + timestamp + "-" + uuid + "." + ext;
+        } else {
+            return originalName + "-" + timestamp + "-" + uuid;
+        }
+    }
+
+    /**
+     * Kiểm tra path có nằm trong simpletexteditor/temp/ không.
+     */
+    private boolean isInTempDir(String path) {
+        if (path == null || path.isEmpty()) return false;
+        try {
+            File tempDir = new File(getSimpleTextEditorDir(), DIR_TEMP).getCanonicalFile();
+            File f = new File(path).getCanonicalFile();
+            return f.getParentFile() != null &&
+                   f.getParentFile().getCanonicalPath().equals(tempDir.getCanonicalPath());
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /**
+     * Xóa file tạm hiện tại nếu isTempFile = true.
+     */
+    private void deleteTempFile() {
+        if (!isTempFile || urlFilename == null || urlFilename.isEmpty()) return;
+        try {
+            String path = Uri.parse(urlFilename).getPath();
+            if (path != null) new File(path).delete();
+        } catch (Exception ignored) {}
+        isTempFile = false;
+    }
+
+    /**
+     * Auto-save nội dung hiện tại vào simpletexteditor/notsave/
+     * Chỉ gọi khi file thật (isTempFile=false) có thay đổi và user mở file khác.
+     * Không hỏi user, không toast lỗi.
+     */
+    private void autoSaveToNotsave() {
+        if (!changed) return;
+        String content = mText.getText().toString();
+        if (content.trim().isEmpty()) return;
+        try {
+            String displayName = currentDisplayName();
+            String fileName = buildTimestampedName(displayName);
+            File dir = new File(getSimpleTextEditorDir(), DIR_NOTSAVE);
+            dir.mkdirs();
+            File outFile = new File(dir, fileName);
+            String encoded = applyEndings(content);
+            try (FileOutputStream fos = new FileOutputStream(outFile)) {
+                fos.write(encoded.getBytes(settingsService.getFileEncoding()));
+            }
+            // Thêm vào recent files để user mở lại được
+            recentFilesService.addRecentFile(outFile.toURI().toString(), getApplicationContext());
+        } catch (Exception ignored) {}
+    }
+
+    /**
+     * Auto-save file tạm vào simpletexteditor/temp/ trước khi tạo file tạm mới.
+     * File tạm giữ nguyên tên (đã ở trong temp/).
+     * Nếu nội dung rỗng thì xóa luôn.
+     */
+    private void autoSaveTempBeforeNew() {
+        if (!isTempFile) return;
+        String content = mText.getText().toString();
+        if (content.trim().isEmpty()) {
+            deleteTempFile();
+            return;
+        }
+        // File tạm đã ở trong temp/, chỉ cần ghi nội dung hiện tại vào đó
+        try {
+            String path = Uri.parse(urlFilename).getPath();
+            if (path == null) return;
+            File f = new File(path);
+            String encoded = applyEndings(content);
+            try (FileOutputStream fos = new FileOutputStream(f)) {
+                fos.write(encoded.getBytes(settingsService.getFileEncoding()));
+            }
+        } catch (Exception ignored) {}
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Lifecycle
+    // ─────────────────────────────────────────────────────────────
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        tabManager = TabManager.getInstance();
-        tabManager.addListener(this::onTabsChanged);
 
         settingsService = ServiceLocator.getInstance().getSettingsService(this.getApplicationContext());
         recentFilesService = ServiceLocator.getInstance().getRecentFilesService();
@@ -257,7 +369,6 @@ public class EditorActivity extends AppCompatActivity {
             restoreState(savedInstanceState);
             restoreEditorContent();
         } else {
-
             verifyPermissions(this);
 
             Intent i = this.getIntent();
@@ -266,7 +377,7 @@ public class EditorActivity extends AppCompatActivity {
                 if (u != null) {
                     openFileByUri(u);
                 }
-            } else { // it this is just created
+            } else {
                 if (isFilenameEmpty()) {
                     if (settingsService.isOpenLastFile()) {
                         openLastFile();
@@ -279,7 +390,6 @@ public class EditorActivity extends AppCompatActivity {
 
         updateTitle();
         mText.requestFocus();
-
         settingsService.applyLocale(this.getBaseContext());
     }
 
@@ -287,10 +397,6 @@ public class EditorActivity extends AppCompatActivity {
         return settingsService.isUseSimpleScrolling();
     }
 
-    private int pendingCloseReadOnlyTabIndex = -1;
-    private boolean openAsReadOnly = false;
-    private static final int DO_OPEN_IN_EDIT = 6;
-    
     @RequiresApi(Build.VERSION_CODES.VANILLA_ICE_CREAM)
     private void applyEdgeToEdgeInsets() {
         View editorRoot = findViewById(R.id.editor_root);
@@ -321,9 +427,7 @@ public class EditorActivity extends AppCompatActivity {
             return;
         }
         int selection = editor.getSelectionStart();
-        if (selection < 0) {
-            return;
-        }
+        if (selection < 0) return;
         int line = editor.getLayout().getLineForOffset(selection);
         Rect caret = new Rect(
                 editor.getTotalPaddingLeft(),
@@ -334,98 +438,6 @@ public class EditorActivity extends AppCompatActivity {
         );
         editor.requestRectangleOnScreen(caret, false);
     }
-
-    private void openFileByUri(Uri u) {
-        if (useAndroidManager()) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-                if (settingsService.isAlternativeFileAccess() &&
-                        alternativeUrlsService.hasAlternativeUrl(u, getApplicationContext())) {
-                    openNamedFile(alternativeUrlsService.getAlternativeUrl(u, getApplicationContext()));
-                } else {
-                    openNamedFile(u);
-                }
-            }
-        } else {
-            openNamedFileLegacy(u.getPath());
-        }
-    }
-
-    private void setTextWatcher() {
-        textWatcher = new TextWatcher() {
-            @Override
-            public void afterTextChanged(Editable s) {
-                if (!suppressRecoveryTracking && changed) {
-                    scheduleRecoverySnapshot();
-                }
-            }
-
-            @Override
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
-            }
-
-            @Override
-            public void onTextChanged(CharSequence s, int start, int before, int count) {
-                invalidateHorizontalScrollBounds();
-                if (suppressRecoveryTracking) {
-                    return;
-                }
-                editorGeneration++;
-                if (!changed) {
-                    changed = true;
-                    updateTitle();
-                }
-            }
-        };
-    }
-
-    /**
-     * Checks if the app has permission to write to device storage
-     * If the app does not has permission then the user will be prompted to grant permissions
-     *
-     * @param activity Activity
-     */
-    public static void verifyPermissions(Activity activity) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-            return;
-        }
-        // Check if we have write permission
-        int permission = activity.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE);
-        String[] PERMISSIONS_STORAGE = {
-                Manifest.permission.READ_EXTERNAL_STORAGE,
-                Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                Manifest.permission.WAKE_LOCK,
-        };
-
-        if (permission != PackageManager.PERMISSION_GRANTED) {
-            // We don't have permission so prompt the user
-            activity.requestPermissions(
-                    PERMISSIONS_STORAGE,
-                    1
-            );
-        }
-    }
-
-    @Override
-    public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (event.isCtrlPressed()) {
-            if (keyCode == KeyEvent.KEYCODE_S) {
-                saveFile();
-                return true;
-            } else if (keyCode == KeyEvent.KEYCODE_Z) {
-                editUndo();
-                return true;
-            } else if (keyCode == KeyEvent.KEYCODE_Y) {
-                editRedo();
-                return true;
-            } else if (keyCode == KeyEvent.KEYCODE_H) {
-                showFindReplaceBar();
-                return true;
-            }
-        }
-
-        return super.onKeyDown(keyCode, event);
-    }
-
 
     protected void onResume() {
         super.onResume();
@@ -462,7 +474,8 @@ public class EditorActivity extends AppCompatActivity {
     }
 
     protected void onPause() {
-        if (settingsService.isAutosavingActive() && !isFilenameEmpty() && isChanged()) {
+        // Autosave chỉ áp dụng cho file thật, không áp dụng cho file tạm
+        if (settingsService.isAutosavingActive() && !isFilenameEmpty() && !isTempFile && isChanged()) {
             this.saveFileIfNamed(true);
         }
 
@@ -475,26 +488,359 @@ public class EditorActivity extends AppCompatActivity {
         if (settingsService.useWakeLock()) {
             ServiceLocator.getInstance().getWakeLockService().releaseLock();
         }
-        
-        // Add snapshot before pause
-        snapshotCurrentTab();
         super.onPause();
     }
 
-    private boolean isChanged() {
-        return changed;
+    @Override
+    protected void onDestroy() {
+        // Xóa file tạm nếu nội dung rỗng khi destroy
+        if (isTempFile) {
+            String content = mText.getText().toString().trim();
+            if (content.isEmpty()) {
+                deleteTempFile();
+            }
+        }
+        recoveryWriter.shutdown();
+        editTextUndoRedo.disconnect();
+        super.onDestroy();
     }
 
-    /**
-     * @param state Bundle
-     */
+    @Override
+    public void onBackPressed() {
+        if (this.changed && !exitDialogShown) {
+            new AlertDialog.Builder(this)
+                    .setTitle(R.string.You_have_made_some_changes)
+                    .setMessage(R.string.Are_you_sure_to_quit)
+                    .setNegativeButton(R.string.Yes, (arg0, arg1) -> {
+                        discardCurrentRecovery();
+                        // Xóa file tạm nếu nội dung rỗng
+                        if (isTempFile && mText.getText().toString().trim().isEmpty()) {
+                            deleteTempFile();
+                        }
+                        EditorActivity.super.onBackPressed();
+                        exitDialogShown = false;
+                    })
+                    .setPositiveButton(R.string.No, (arg0, arg1) -> {
+                        exitDialogShown = false;
+                    })
+                    .setOnCancelListener(arg0 -> EditorActivity.super.onBackPressed())
+                    .create()
+                    .show();
+            exitDialogShown = true;
+        } else {
+            super.onBackPressed();
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // State save/restore
+    // ─────────────────────────────────────────────────────────────
+
     private void restoreState(Bundle state) {
         urlFilename = state.getString(STATE_FILENAME);
         changed = state.getBoolean(STATE_CHANGED);
         selectionStart = state.getInt(STATE_CURSOR_POSITION);
         selectionEnd = state.getInt(STATE_CURSOR_END, selectionStart);
         recoveryKey = state.getString(STATE_RECOVERY_KEY);
+        isTempFile = state.getBoolean(STATE_IS_TEMP_FILE, false);
     }
+
+    public void onSaveInstanceState(@NonNull Bundle outState) {
+        if (changed) {
+            flushRecoverySnapshot();
+        }
+        super.onSaveInstanceState(outState);
+        outState.putString(STATE_FILENAME, urlFilename);
+        outState.putBoolean(STATE_CHANGED, changed);
+        outState.putInt(STATE_CURSOR_POSITION, mText.getSelectionStart());
+        outState.putInt(STATE_CURSOR_END, mText.getSelectionEnd());
+        outState.putString(STATE_RECOVERY_KEY, recoveryKey);
+        outState.putBoolean(STATE_IS_TEMP_FILE, isTempFile);
+    }
+
+    protected void onStop() {
+        super.onStop();
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // New / Clear file
+    // ─────────────────────────────────────────────────────────────
+
+    public void newFile() {
+        // Không hỏi user — tự động xử lý file hiện tại
+        handleCurrentFileBeforeSwitch();
+        clearFile();
+    }
+
+    /**
+     * Xử lý file hiện tại trước khi chuyển sang file mới / mở file khác.
+     * - isTempFile + nội dung rỗng → xóa file tạm
+     * - isTempFile + có nội dung → giữ nguyên (đã ở trong temp/)
+     * - file thật + có thay đổi → auto save vào notsave/
+     */
+    private void handleCurrentFileBeforeSwitch() {
+        if (isTempFile) {
+            autoSaveTempBeforeNew();
+        } else if (changed) {
+            autoSaveToNotsave();
+        }
+    }
+
+    public void clearFile() {
+        discardCurrentRecovery();
+        editorGeneration = 0;
+        originalSize = null;
+        originalLastModified = null;
+        originalContentSha256 = null;
+        selectionStart = 0;
+        selectionEnd = 0;
+        setEditorText(TPStrings.EMPTY, false);
+
+        // Tạo file tạm mới trong simpletexteditor/temp/
+        File tempFile = createNewTempFile();
+        // Ghi file rỗng để file tồn tại trên disk
+        try { tempFile.createNewFile(); } catch (IOException ignored) {}
+
+        // Dùng trực tiếp urlFilename, KHÔNG qua setFilename() để tránh ghi vào recent files
+        urlFilename = tempFile.toURI().toString();
+        isTempFile = true;
+
+        initEditor();
+        updateTitle();
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Open file
+    // ─────────────────────────────────────────────────────────────
+
+    protected void openFile() {
+        handleCurrentFileBeforeSwitch();
+        openNewFile();
+    }
+
+    private void openRecentFile(int i) {
+        ArrayList<String> lastFiles = recentFilesService.getLastFiles(1, getApplicationContext());
+        if (i >= lastFiles.size()) return;
+        final String filename = lastFiles.get(i);
+        handleCurrentFileBeforeSwitch();
+        openFileByName(filename);
+    }
+
+    private void openFileByName(String filename) {
+        if (useAndroidManager()) {
+            Uri uri = Uri.parse(filename);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                this.openNamedFile(uri);
+            }
+        } else {
+            this.openNamedFileLegacy(filename);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Save file
+    // ─────────────────────────────────────────────────────────────
+
+    protected void saveFile() {
+        if (isFilenameEmpty() || isTempFile) {
+            // Gợi ý tên file trong dialog là tên file tạm hiện tại
+            saveAs();
+        } else {
+            saveFileIfNamed();
+        }
+    }
+
+    protected void saveAs() {
+        if (useAndroidManager()) {
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("*/*");
+            intent.putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes);
+            // Gợi ý tên: nếu đang là temp file thì dùng tên file tạm, không thì NEW_FILE_TXT
+            String suggestedName = TPStrings.NEW_FILE_TXT;
+            if (isTempFile && !urlFilename.isEmpty()) {
+                try {
+                    String path = Uri.parse(urlFilename).getPath();
+                    if (path != null) suggestedName = new File(path).getName();
+                } catch (Exception ignored) {}
+            }
+            intent.putExtra(Intent.EXTRA_TITLE, suggestedName);
+            intent.putExtra("android.content.extra.SHOW_ADVANCED", true);
+            startActivityForResult(intent, ACTION_CREATE_FILE);
+        } else {
+            Intent intent = new Intent(this.getBaseContext(), FileDialog.class);
+            this.startActivityForResult(intent, REQUEST_SAVE);
+        }
+    }
+
+    protected void saveFileIfNamed() {
+        saveFileIfNamed(false);
+    }
+
+    private void saveFileIfNamed(boolean autosave) {
+        guardedSaveNamedFile(autosave);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // onActivityResult
+    // ─────────────────────────────────────────────────────────────
+
+    @SuppressLint("WrongConstant")
+    public synchronized void onActivityResult(
+            final int requestCode,
+            int resultCode,
+            final Intent data
+    ) {
+        if (requestCode == REQUEST_SAVE) {
+            if (resultCode == Activity.RESULT_OK) {
+                setFilename(data.getStringExtra(TPStrings.RESULT_PATH));
+                nextSaveCreatesDocument = true;
+                this.saveFileWithConfirmation();
+            } else if (resultCode == Activity.RESULT_CANCELED) {
+                showToast(R.string.Operation_Canceled);
+            }
+        } else if (requestCode == REQUEST_OPEN) {
+            if (resultCode == Activity.RESULT_OK) {
+                this.openNamedFileLegacy(data.getStringExtra(TPStrings.RESULT_PATH));
+            } else if (resultCode == Activity.RESULT_CANCELED) {
+                showToast(R.string.Operation_Canceled);
+            }
+        } else if (requestCode == REQUEST_SETTINGS) {
+            applyPreferences();
+        } else if (requestCode == ACTION_OPEN_FILE && resultCode == Activity.RESULT_OK) {
+            if (data != null) {
+                Uri uri = data.getData();
+                if (uri != null) {
+                    persistUriPermissions(data);
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                        openNamedFile(uri);
+                    }
+                }
+            }
+        } else if (requestCode == ACTION_CREATE_FILE) {
+            if (data != null) {
+                persistUriPermissions(data);
+                Uri uri = data.getData();
+                if (uri != null) {
+                    // User đã chọn nơi lưu thật → xóa file tạm, đặt filename thật
+                    deleteTempFile();
+                    setFilename(uri.toString());
+                    nextSaveCreatesDocument = true;
+                    this.saveFileWithConfirmation();
+                }
+            }
+        }
+        super.onActivityResult(requestCode, resultCode, data);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Filename helpers — không ghi temp vào recent files
+    // ─────────────────────────────────────────────────────────────
+
+    private void setFilename(String value) {
+        this.urlFilename = value;
+        isTempFile = false; // khi setFilename được gọi với path thật, không còn là temp
+        storeLastFileName(value);
+    }
+
+    private void storeLastFileName(String value) {
+        if (isFilenameEmpty()) return;
+        if (isTempFile) return; // không ghi temp vào recent
+        if (!settingsService.isShowLastEditedFiles()) return;
+        recentFilesService.addRecentFile(value, getApplicationContext());
+    }
+
+    private boolean isFilenameEmpty() {
+        return urlFilename == null || urlFilename.equals(TPStrings.EMPTY);
+    }
+
+    private String getFilename() {
+        return urlFilename;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Exit
+    // ─────────────────────────────────────────────────────────────
+
+    protected void exitApplication() {
+        // File tạm rỗng → xóa; file tạm có nội dung → giữ lại trong temp/
+        if (isTempFile && mText.getText().toString().trim().isEmpty()) {
+            deleteTempFile();
+        }
+        discardCurrentRecovery();
+        System.exitFromApp(EditorActivity.this);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Phần còn lại không thay đổi
+    // ─────────────────────────────────────────────────────────────
+
+    private void openFileByUri(Uri u) {
+        if (useAndroidManager()) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                if (settingsService.isAlternativeFileAccess() &&
+                        alternativeUrlsService.hasAlternativeUrl(u, getApplicationContext())) {
+                    openNamedFile(alternativeUrlsService.getAlternativeUrl(u, getApplicationContext()));
+                } else {
+                    openNamedFile(u);
+                }
+            }
+        } else {
+            openNamedFileLegacy(u.getPath());
+        }
+    }
+
+    private void setTextWatcher() {
+        textWatcher = new TextWatcher() {
+            @Override
+            public void afterTextChanged(Editable s) {
+                if (!suppressRecoveryTracking && changed) {
+                    scheduleRecoverySnapshot();
+                }
+            }
+
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+                invalidateHorizontalScrollBounds();
+                if (suppressRecoveryTracking) return;
+                editorGeneration++;
+                if (!changed) {
+                    changed = true;
+                    updateTitle();
+                }
+            }
+        };
+    }
+
+    public static void verifyPermissions(Activity activity) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
+        int permission = activity.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+        String[] PERMISSIONS_STORAGE = {
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                Manifest.permission.WAKE_LOCK,
+        };
+        if (permission != PackageManager.PERMISSION_GRANTED) {
+            activity.requestPermissions(PERMISSIONS_STORAGE, 1);
+        }
+    }
+
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (event.isCtrlPressed()) {
+            if (keyCode == KeyEvent.KEYCODE_S) { saveFile(); return true; }
+            else if (keyCode == KeyEvent.KEYCODE_Z) { editUndo(); return true; }
+            else if (keyCode == KeyEvent.KEYCODE_Y) { editRedo(); return true; }
+            else if (keyCode == KeyEvent.KEYCODE_H) { showFindReplaceBar(); return true; }
+        }
+        return super.onKeyDown(keyCode, event);
+    }
+
+    private boolean isChanged() { return changed; }
 
     private void restoreEditorContent() {
         if (changed && recoveryKey != null) {
@@ -536,8 +882,7 @@ public class EditorActivity extends AppCompatActivity {
         recoveryDialogShowing = true;
         String timestamp = DateFormat.getDateTimeInstance().format(new Date(draft.metadata.draftUpdatedAt));
         String name = draft.metadata.displayName == null || draft.metadata.displayName.isEmpty()
-                ? TPStrings.NEW_FILE_TXT
-                : draft.metadata.displayName;
+                ? TPStrings.NEW_FILE_TXT : draft.metadata.displayName;
         new AlertDialog.Builder(this)
                 .setTitle(R.string.Recovery_draft_found)
                 .setMessage(getString(R.string.Recovery_draft_message, name, timestamp))
@@ -545,9 +890,7 @@ public class EditorActivity extends AppCompatActivity {
                 .setNegativeButton(R.string.Discard_draft, (dialog, which) -> {
                     clearPendingRecoveryDecision();
                     recoveryRepository.delete(draft.metadata.recoveryKey);
-                    if (draft.metadata.recoveryKey.equals(recoveryKey)) {
-                        recoveryKey = null;
-                    }
+                    if (draft.metadata.recoveryKey.equals(recoveryKey)) recoveryKey = null;
                     discardLoader.run();
                 })
                 .setCancelable(false)
@@ -602,22 +945,16 @@ public class EditorActivity extends AppCompatActivity {
 
     private void scheduleRecoverySnapshot() {
         RecoveryWriter.Snapshot snapshot = createRecoverySnapshot();
-        if (snapshot != null) {
-            recoveryWriter.schedule(snapshot);
-        }
+        if (snapshot != null) recoveryWriter.schedule(snapshot);
     }
 
     private void flushRecoverySnapshot() {
         RecoveryWriter.Snapshot snapshot = createRecoverySnapshot();
-        if (snapshot != null) {
-            recoveryWriter.flushAndWait(snapshot, 2000);
-        }
+        if (snapshot != null) recoveryWriter.flushAndWait(snapshot, 2000);
     }
 
     private RecoveryWriter.Snapshot createRecoverySnapshot() {
-        if (!changed || recoveryDecisionPending) {
-            return null;
-        }
+        if (!changed || recoveryDecisionPending) return null;
         String identity = documentIdentityUri();
         if (recoveryKey == null) {
             recoveryKey = identity == null
@@ -627,49 +964,29 @@ public class EditorActivity extends AppCompatActivity {
         int start = Math.max(0, mText.getSelectionStart());
         int end = Math.max(0, mText.getSelectionEnd());
         RecoveryMetadata metadata = new RecoveryMetadata(
-                recoveryKey,
-                identity,
-                currentDisplayName(),
-                identity == null,
-                settingsService.getFileEncoding(),
-                false,
-                originalSize,
-                originalLastModified,
-                originalContentSha256,
-                0,
-                0,
-                start,
-                end,
-                editorGeneration
+                recoveryKey, identity, currentDisplayName(), identity == null,
+                settingsService.getFileEncoding(), false,
+                originalSize, originalLastModified, originalContentSha256,
+                0, 0, start, end, editorGeneration
         );
         return new RecoveryWriter.Snapshot(metadata, mText.getText().toString());
     }
 
     private String documentIdentityUri() {
-        if (isFilenameEmpty()) {
-            return null;
-        }
-        if (useAndroidManager()) {
-            return urlFilename;
-        }
+        if (isFilenameEmpty()) return null;
+        if (useAndroidManager()) return urlFilename;
         return Uri.fromFile(new File(urlFilename)).toString();
     }
 
     private String filenameFromIdentity(String identity) {
-        if (useAndroidManager()) {
-            return identity;
-        }
+        if (useAndroidManager()) return identity;
         String path = Uri.parse(identity).getPath();
         return path == null ? TPStrings.EMPTY : path;
     }
 
     private String currentDisplayName() {
-        if (isFilenameEmpty()) {
-            return TPStrings.NEW_FILE_TXT;
-        }
-        if (useAndroidManager()) {
-            return FileNameHelper.getFilenameByUri(this, Uri.parse(urlFilename));
-        }
+        if (isFilenameEmpty()) return TPStrings.NEW_FILE_TXT;
+        if (useAndroidManager()) return FileNameHelper.getFilenameByUri(this, Uri.parse(urlFilename));
         return new File(urlFilename).getName();
     }
 
@@ -684,77 +1001,13 @@ public class EditorActivity extends AppCompatActivity {
         selectionEnd = 0;
     }
 
-    /**
-     * @param outState Bundle
-     */
-    public void onSaveInstanceState(@NonNull Bundle outState) {
-        if (changed) {
-            flushRecoverySnapshot();
-        }
-        super.onSaveInstanceState(outState);
-        outState.putString(STATE_FILENAME, urlFilename);
-        outState.putBoolean(STATE_CHANGED, changed);
-        outState.putInt(STATE_CURSOR_POSITION, mText.getSelectionStart());
-        outState.putInt(STATE_CURSOR_END, mText.getSelectionEnd());
-        outState.putString(STATE_RECOVERY_KEY, recoveryKey);
-    }
-
-    protected void onStop() {
-        super.onStop();
-    }
-
-    @Override
-    protected void onDestroy() {
-        tabManager.removeListener(this::onTabsChanged); // prevent leak
-        recoveryWriter.shutdown();
-        editTextUndoRedo.disconnect();
-        super.onDestroy();
-    }
-
-    // @Override
-    // protected void onDestroy() {
-    //     recoveryWriter.shutdown();
-    //     editTextUndoRedo.disconnect();
-    //     super.onDestroy();
-    // }
-
-    @Override
-    public void onBackPressed() {
-        if (this.changed && !exitDialogShown) {
-            new AlertDialog.Builder(this)
-                    .setTitle(R.string.You_have_made_some_changes)
-                    .setMessage(R.string.Are_you_sure_to_quit)
-                    .setNegativeButton(R.string.Yes, (arg0, arg1) -> {
-                        discardCurrentRecovery();
-                        EditorActivity.super.onBackPressed();
-                        exitDialogShown = false;
-                    })
-                    .setPositiveButton(R.string.No, (arg0, arg1) -> {
-                        //do nothing
-                        exitDialogShown = false;
-                    })
-                    .setOnCancelListener(arg0 -> EditorActivity.super.onBackPressed())
-                    .create()
-                    .show();
-            exitDialogShown = true;
-        } else {
-            super.onBackPressed();
-        }
-    }
-
     String formatString(int stringId, String parameter) {
         return this.getResources().getString(stringId, parameter);
     }
 
     boolean useAndroidManager() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT) {
-            return false;
-        }
-
-        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
-            return true;
-        }
-
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT) return false;
+        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) return true;
         return !settingsService.isLegacyFilePicker();
     }
 
@@ -762,7 +1015,7 @@ public class EditorActivity extends AppCompatActivity {
         if (!settingsService.getLastFilename().equals(TPStrings.EMPTY)) {
             if (useAndroidManager()) {
                 Uri uri = Uri.parse(settingsService.getLastFilename());
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) { // duplicated in useAndroidManager
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
                     this.openNamedFile(uri);
                 }
             } else {
@@ -775,16 +1028,8 @@ public class EditorActivity extends AppCompatActivity {
     }
 
     void updateTitle() {
-        EditorState active = tabManager != null ? tabManager.getActiveTab() : null;
-        boolean isReadOnly = active != null && active.isReadOnly;
-        String title = getEditingTitle();
-        if (isReadOnly) title = "[R] " + title; // prefix for read-only tab
-        this.setTitle(title);
+        this.setTitle(getEditingTitle());
     }
-
-    // void updateTitle() {
-    //     this.setTitle(getEditingTitle());
-    // }
 
     private String getEditingTitle() {
         String title;
@@ -794,18 +1039,8 @@ public class EditorActivity extends AppCompatActivity {
             Uri uri = Uri.parse(getFilename());
             title = FileNameHelper.getFilenameByUri(getApplicationContext(), uri);
         }
-        if (changed) {
-            title = title + TPStrings.STAR;
-        }
+        if (changed) title = title + TPStrings.STAR;
         return title;
-    }
-
-    private String getFilename() {
-        return urlFilename;
-    }
-
-    private boolean isFilenameEmpty() {
-        return urlFilename.equals(TPStrings.EMPTY);
     }
 
     void applyPreferences() {
@@ -827,42 +1062,23 @@ public class EditorActivity extends AppCompatActivity {
                 InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS |
                 InputType.TYPE_TEXT_VARIATION_NORMAL |
                 InputType.TYPE_CLASS_TEXT);
-
         String font = settingsService.getFont();
-
-        if (font.equals(TPStrings.FONT_SERIF))
-            mText.setTypeface(Typeface.SERIF);
-        else if (font.equals(TPStrings.FONT_SANS_SERIF))
-            mText.setTypeface(Typeface.SANS_SERIF);
-        else
-            mText.setTypeface(Typeface.MONOSPACE);
+        if (font.equals(TPStrings.FONT_SERIF)) mText.setTypeface(Typeface.SERIF);
+        else if (font.equals(TPStrings.FONT_SANS_SERIF)) mText.setTypeface(Typeface.SANS_SERIF);
+        else mText.setTypeface(Typeface.MONOSPACE);
     }
 
     private void applyFontSize() {
         String fontsize = settingsService.getFontSize();
-
         switch (fontsize) {
-            case (SettingsService.SETTING_EXTRA_SMALL):
-                mText.setTextSize(12.0f);
-                break;
-            case (SettingsService.SETTING_SMALL):
-                mText.setTextSize(16.0f);
-                break;
-            case (SettingsService.SETTING_MEDIUM_SMALL):
-                mText.setTextSize(18.0f);
-                break;
-            case (SettingsService.SETTING_LARGE):
-                mText.setTextSize(24.0f);
-                break;
-            case (SettingsService.SETTING_HUGE):
-                mText.setTextSize(28.0f);
-                break;
-            case (SettingsService.SETTING_EXTRA_HUGE):
-                mText.setTextSize(56.0f);
-                break;
+            case (SettingsService.SETTING_EXTRA_SMALL): mText.setTextSize(12.0f); break;
+            case (SettingsService.SETTING_SMALL): mText.setTextSize(16.0f); break;
+            case (SettingsService.SETTING_MEDIUM_SMALL): mText.setTextSize(18.0f); break;
+            case (SettingsService.SETTING_LARGE): mText.setTextSize(24.0f); break;
+            case (SettingsService.SETTING_HUGE): mText.setTextSize(28.0f); break;
+            case (SettingsService.SETTING_EXTRA_HUGE): mText.setTextSize(56.0f); break;
             case (SettingsService.SETTING_MEDIUM):
-            default:
-                mText.setTextSize(20.0f);
+            default: mText.setTextSize(20.0f);
         }
     }
 
@@ -873,26 +1089,19 @@ public class EditorActivity extends AppCompatActivity {
             themeService.applyColorTheme(this);
         }
         if (settingsService.isCustomTheme()) {
-            if (simpleScrolling()) {
-                linearLayout.setBackgroundColor(settingsService.getBgColor());
-            } else {
-                scrollView.setBackgroundColor(settingsService.getBgColor());
-            }
+            if (simpleScrolling()) linearLayout.setBackgroundColor(settingsService.getBgColor());
+            else scrollView.setBackgroundColor(settingsService.getBgColor());
             mText.setTextColor(settingsService.getFontColor());
         }
     }
 
     private QueryTextListener getQueryTextListener() {
-        if (queryTextListener == null) {
-            queryTextListener = new QueryTextListener();
-        }
+        if (queryTextListener == null) queryTextListener = new QueryTextListener();
         return queryTextListener;
     }
 
     private void initSearch(MenuItem searchItem) {
-        // Set up search view
         SearchView searchView = (SearchView) searchItem.getActionView();
-        // Set up search view options and listener
         if (searchView != null) {
             searchView.setSubmitButtonEnabled(true);
             searchView.setIconified(false);
@@ -906,19 +1115,15 @@ public class EditorActivity extends AppCompatActivity {
         View bar = findViewById(R.id.find_replace_bar);
         if (bar == null) return;
         bar.setVisibility(View.VISIBLE);
-
         EditText findInput = findViewById(R.id.find_input);
         if (findInput != null) findInput.requestFocus();
-
         findViewById(R.id.btn_find_prev).setOnClickListener(v -> findMove(-1));
         findViewById(R.id.btn_find_next).setOnClickListener(v -> findMove(1));
         findViewById(R.id.btn_find_close).setOnClickListener(v -> hideFindReplaceBar());
         findViewById(R.id.btn_replace_one).setOnClickListener(v -> replaceNext());
         findViewById(R.id.btn_replace_all).setOnClickListener(v -> replaceAll());
-
-        EditText fi = findInput;
-        if (fi != null) {
-            fi.addTextChangedListener(new TextWatcher() {
+        if (findInput != null) {
+            findInput.addTextChangedListener(new TextWatcher() {
                 @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
                 @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
                     runFindAll(s.toString());
@@ -940,10 +1145,7 @@ public class EditorActivity extends AppCompatActivity {
     private void runFindAll(String query) {
         findResults.clear();
         findCurrentIndex = -1;
-        if (query.isEmpty()) {
-            updateFindCount();
-            return;
-        }
+        if (query.isEmpty()) { updateFindCount(); return; }
         String content = mText.getText().toString();
         String lower = content.toLowerCase();
         String queryLower = query.toLowerCase();
@@ -983,11 +1185,8 @@ public class EditorActivity extends AppCompatActivity {
     private void updateFindCount() {
         TextView findCount = findViewById(R.id.find_count);
         if (findCount == null) return;
-        if (findResults.isEmpty()) {
-            findCount.setText("0/0");
-        } else {
-            findCount.setText((findCurrentIndex + 1) + "/" + findResults.size());
-        }
+        if (findResults.isEmpty()) findCount.setText("0/0");
+        else findCount.setText((findCurrentIndex + 1) + "/" + findResults.size());
     }
 
     private void replaceNext() {
@@ -1022,156 +1221,42 @@ public class EditorActivity extends AppCompatActivity {
 
     @Override
     public boolean onPrepareOptionsMenu(Menu menu) {
-
         MenuItem searchItem = menu.findItem(R.id.menu_document_search);
-        if (searchItem.isActionViewExpanded()) {
-            searchItem.collapseActionView();
-        }
-
-
-        MenuItem undoMenu = menu.findItem(R.id.menu_edit_undo);
-        undoMenu.setEnabled(editTextUndoRedo.getCanUndo());
-
-        MenuItem redoMenu = menu.findItem(R.id.menu_edit_redo);
-        redoMenu.setEnabled(editTextUndoRedo.getCanRedo());
-
-        MenuItem goToMenu = menu.findItem(R.id.menu_document_go_to);
-        goToMenu.setEnabled(mText.length() > 0);
-
+        if (searchItem.isActionViewExpanded()) searchItem.collapseActionView();
+        menu.findItem(R.id.menu_edit_undo).setEnabled(editTextUndoRedo.getCanUndo());
+        menu.findItem(R.id.menu_edit_redo).setEnabled(editTextUndoRedo.getCanRedo());
+        menu.findItem(R.id.menu_document_go_to).setEnabled(mText.length() > 0);
         updateRecentFiles(menu);
-
         if (android.os.Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-            MenuItem printMenu = menu.findItem(R.id.menu_document_print);
-            printMenu.setVisible(false);
+            menu.findItem(R.id.menu_document_print).setVisible(false);
         }
-        
-        // Show "Edit this file" button only on read-only tabs
-        MenuItem editInMainItem = menu.findItem(R.id.menu_document_edit_in_main);
-        if (editInMainItem != null) {
-            EditorState active = tabManager.getActiveTab();
-            editInMainItem.setVisible(active != null && active.isReadOnly);
-        }
-
-        updateTabsMenu(menu);
-        
         return true;
     }
 
     private void updateRecentFiles(Menu menu) {
         MenuItem recentFilesMenuItem = menu.findItem(R.id.menu_document_open_last);
-        if (settingsService.isShowLastEditedFiles()) {
-            recentFilesMenuItem.setVisible(true);
-        } else {
+        if (!settingsService.isShowLastEditedFiles()) {
             recentFilesMenuItem.setVisible(false);
             return;
         }
+        recentFilesMenuItem.setVisible(true);
         ArrayList<String> recentFiles = recentFilesService.getLastFiles(1, this.getApplicationContext());
-        MenuItem recentFilesMenuItem1 = menu.findItem(R.id.menu_document_open_last1);
-        MenuItem recentFilesMenuItem2 = menu.findItem(R.id.menu_document_open_last2);
-        MenuItem recentFilesMenuItem3 = menu.findItem(R.id.menu_document_open_last3);
-        MenuItem recentFilesMenuItem4 = menu.findItem(R.id.menu_document_open_last4);
-        MenuItem recentFilesMenuItem5 = menu.findItem(R.id.menu_document_open_last5);
-
-        int historySize = recentFiles.size();
-        switch (historySize) {
-            case 0:
-                recentFilesMenuItem.setVisible(false);
-                recentFilesMenuItem1.setVisible(false);
-                recentFilesMenuItem2.setVisible(false);
-                recentFilesMenuItem3.setVisible(false);
-                recentFilesMenuItem4.setVisible(false);
-                recentFilesMenuItem5.setVisible(false);
-                break;
-            case 1:
-                recentFilesMenuItem.setVisible(true);
-                recentFilesMenuItem1.setVisible(true);
-                recentFilesMenuItem1.setTitle(FileNameHelper.getFilenameByUri(getApplicationContext(), recentFiles.get(0)));
-                recentFilesMenuItem2.setVisible(false);
-                recentFilesMenuItem3.setVisible(false);
-                recentFilesMenuItem4.setVisible(false);
-                recentFilesMenuItem5.setVisible(false);
-                break;
-            case 2:
-                recentFilesMenuItem.setVisible(true);
-                recentFilesMenuItem1.setVisible(true);
-                recentFilesMenuItem1.setTitle(FileNameHelper.getFilenameByUri(getApplicationContext(), recentFiles.get(0)));
-                recentFilesMenuItem2.setVisible(true);
-                recentFilesMenuItem2.setTitle(FileNameHelper.getFilenameByUri(getApplicationContext(), recentFiles.get(1)));
-                recentFilesMenuItem3.setVisible(false);
-                recentFilesMenuItem4.setVisible(false);
-                recentFilesMenuItem5.setVisible(false);
-                break;
-            case 3:
-                recentFilesMenuItem.setVisible(true);
-                recentFilesMenuItem1.setVisible(true);
-                recentFilesMenuItem1.setTitle(FileNameHelper.getFilenameByUri(getApplicationContext(), recentFiles.get(0)));
-                recentFilesMenuItem2.setVisible(true);
-                recentFilesMenuItem2.setTitle(FileNameHelper.getFilenameByUri(getApplicationContext(), recentFiles.get(1)));
-                recentFilesMenuItem3.setVisible(true);
-                recentFilesMenuItem3.setTitle(FileNameHelper.getFilenameByUri(getApplicationContext(), recentFiles.get(2)));
-                recentFilesMenuItem4.setVisible(false);
-                recentFilesMenuItem5.setVisible(false);
-                break;
-            case 4:
-                recentFilesMenuItem.setVisible(true);
-                recentFilesMenuItem1.setVisible(true);
-                recentFilesMenuItem1.setTitle(FileNameHelper.getFilenameByUri(getApplicationContext(), recentFiles.get(0)));
-                recentFilesMenuItem2.setVisible(true);
-                recentFilesMenuItem2.setTitle(FileNameHelper.getFilenameByUri(getApplicationContext(), recentFiles.get(1)));
-                recentFilesMenuItem3.setVisible(true);
-                recentFilesMenuItem3.setTitle(FileNameHelper.getFilenameByUri(getApplicationContext(), recentFiles.get(2)));
-                recentFilesMenuItem4.setVisible(true);
-                recentFilesMenuItem4.setTitle(FileNameHelper.getFilenameByUri(getApplicationContext(), recentFiles.get(3)));
-                recentFilesMenuItem5.setVisible(false);
-                break;
-            default:
-                recentFilesMenuItem.setVisible(true);
-                recentFilesMenuItem1.setVisible(true);
-                recentFilesMenuItem1.setTitle(FileNameHelper.getFilenameByUri(getApplicationContext(), recentFiles.get(0)));
-                recentFilesMenuItem2.setVisible(true);
-                recentFilesMenuItem2.setTitle(FileNameHelper.getFilenameByUri(getApplicationContext(), recentFiles.get(1)));
-                recentFilesMenuItem3.setVisible(true);
-                recentFilesMenuItem3.setTitle(FileNameHelper.getFilenameByUri(getApplicationContext(), recentFiles.get(2)));
-                recentFilesMenuItem4.setVisible(true);
-                recentFilesMenuItem4.setTitle(FileNameHelper.getFilenameByUri(getApplicationContext(), recentFiles.get(3)));
-                recentFilesMenuItem5.setVisible(true);
-                recentFilesMenuItem5.setTitle(FileNameHelper.getFilenameByUri(getApplicationContext(), recentFiles.get(4)));
-                break;
-        }
-    }
-
-    private void updateTabsMenu(Menu menu) {
-        List<EditorState> tabs = tabManager.getTabs();
-        int activeIndex = tabManager.getActiveIndex();
-
-        int[] tabMenuIds = {
-            R.id.menu_tab_0,
-            R.id.menu_tab_1,
-            R.id.menu_tab_2,
-            R.id.menu_tab_3,
-            R.id.menu_tab_4
+        MenuItem[] items = {
+            menu.findItem(R.id.menu_document_open_last1),
+            menu.findItem(R.id.menu_document_open_last2),
+            menu.findItem(R.id.menu_document_open_last3),
+            menu.findItem(R.id.menu_document_open_last4),
+            menu.findItem(R.id.menu_document_open_last5)
         };
-
-        for (int i = 0; i < tabMenuIds.length; i++) {
-            MenuItem item = menu.findItem(tabMenuIds[i]);
-            if (item == null) continue;
-
-            if (i < tabs.size()) {
-                EditorState state = tabs.get(i);
-                item.setVisible(true);
-
-                // Build display title
-                String name = (state.displayName != null && !state.displayName.isEmpty())
-                        ? state.displayName
-                        : (i == 0 ? "Edit Tab" : "Tab " + i);
-                String prefix = (i == activeIndex) ? "▶ " : "   ";
-                String suffix = state.changed ? " *" : "";
-                String readOnly = state.isReadOnly ? " [R]" : "";
-                item.setTitle(prefix + name + readOnly + suffix);
+        for (int i = 0; i < items.length; i++) {
+            if (i < recentFiles.size()) {
+                items[i].setVisible(true);
+                items[i].setTitle(FileNameHelper.getFilenameByUri(getApplicationContext(), recentFiles.get(i)));
             } else {
-                item.setVisible(false);
+                items[i].setVisible(false);
             }
         }
+        if (recentFiles.isEmpty()) recentFilesMenuItem.setVisible(false);
     }
 
     @SuppressLint("RestrictedApi")
@@ -1179,135 +1264,75 @@ public class EditorActivity extends AppCompatActivity {
     public boolean onCreateOptionsMenu(Menu menu) {
         getMenuInflater().inflate(R.menu.main_menu, menu);
         optionsMenu = menu;
-
         if (menu instanceof MenuBuilder) {
-            MenuBuilder m = (MenuBuilder) menu;
-            m.setOptionalIconsVisible(true);
+            ((MenuBuilder) menu).setOptionalIconsVisible(true);
         }
-
         return true;
     }
 
     @Override
     public boolean onOptionsItemSelected(@NonNull MenuItem item) {
         int itemId = item.getItemId();
-        if (itemId == R.id.menu_document_open) {
-            openFile();
-        } else if (itemId == R.id.menu_document_open_other) {
+        if (itemId == R.id.menu_document_open || itemId == R.id.menu_document_open_other) {
             openFile();
         } else if (itemId == R.id.menu_document_search) {
             initSearch(item);
         } else if (itemId == R.id.menu_document_find_replace) {
             showFindReplaceBar();
-        } else if (itemId == R.id.menu_document_open_last1) {
-            openRecentFile(0);
-        } else if (itemId == R.id.menu_document_open_last2) {
-            openRecentFile(1);
-        } else if (itemId == R.id.menu_document_open_last3) {
-            openRecentFile(2);
-        } else if (itemId == R.id.menu_document_open_last4) {
-            openRecentFile(3);
-        } else if (itemId == R.id.menu_document_open_last5) {
-            openRecentFile(4);
-        } else if (itemId == R.id.menu_document_new) {
-            newFile();
-        } else if (itemId == R.id.menu_document_save) {
-            saveFile();
-        } else if (itemId == R.id.menu_document_save_as) {
-            saveAs();
-        } else if (itemId == R.id.menu_document_go_to_beginning) {
-            moveCaretPosition(0);
-        } else if (itemId == R.id.menu_document_go_to_end) {
-            moveCaretPosition(mText.length());
-        } else if (itemId == R.id.menu_edit_undo) {
-            editUndo();
-        } else if (itemId == R.id.menu_edit_redo) {
-            editRedo();
-        } else if (itemId == R.id.menu_document_share) {
-            shareText();
-        } else if (itemId == R.id.menu_document_print) {
-            printText();
-        } else if (itemId == R.id.menu_document_settings) {
-            showSettings();
-        } else if (itemId == R.id.menu_tab_0) {
-            switchToTab(0);
-        } else if (itemId == R.id.menu_tab_1) {
-            switchToTab(1);
-        } else if (itemId == R.id.menu_tab_2) {
-            switchToTab(2);
-        } else if (itemId == R.id.menu_tab_3) {
-            switchToTab(3);
-        } else if (itemId == R.id.menu_tab_4) {
-            switchToTab(4);
-        } else if (itemId == R.id.menu_document_edit_in_main) {
-            requestEditCurrentReadOnlyFile();
-        } else if (itemId == R.id.menu_document_open_new_tab) {
-            openFileInNewTab();
-        } else if (itemId == R.id.menu_exit) {
-            exitApplication();
+        } else if (itemId == R.id.menu_document_open_last1) { openRecentFile(0);
+        } else if (itemId == R.id.menu_document_open_last2) { openRecentFile(1);
+        } else if (itemId == R.id.menu_document_open_last3) { openRecentFile(2);
+        } else if (itemId == R.id.menu_document_open_last4) { openRecentFile(3);
+        } else if (itemId == R.id.menu_document_open_last5) { openRecentFile(4);
+        } else if (itemId == R.id.menu_document_new) { newFile();
+        } else if (itemId == R.id.menu_document_save) { saveFile();
+        } else if (itemId == R.id.menu_document_save_as) { saveAs();
+        } else if (itemId == R.id.menu_document_go_to_beginning) { moveCaretPosition(0);
+        } else if (itemId == R.id.menu_document_go_to_end) { moveCaretPosition(mText.length());
+        } else if (itemId == R.id.menu_edit_undo) { editUndo();
+        } else if (itemId == R.id.menu_edit_redo) { editRedo();
+        } else if (itemId == R.id.menu_document_share) { shareText();
+        } else if (itemId == R.id.menu_document_print) { printText();
+        } else if (itemId == R.id.menu_document_settings) { showSettings();
+        } else if (itemId == R.id.menu_exit) { exitApplication();
         }
-
         return super.onOptionsItemSelected(item);
     }
 
     private void printText() {
         if (android.os.Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            // Create a WebView object specifically for printing
             WebView webView = new WebView(this);
             webView.setWebViewClient(new WebViewClient() {
-
-                public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                    return false;
-                }
-
+                public boolean shouldOverrideUrlLoading(WebView view, String url) { return false; }
                 @Override
                 public void onPageFinished(WebView view, String url) {
                     createWebPrintJob(view);
                     mWebView = null;
                 }
             });
-
-            // Generate an HTML document on the fly:
             String htmlDocument = "<html><body><pre style='padding:1.5cm 1cm 1.5cm 2cm'>" +
-                    mText.getText() +
-                    "</pre></body></html>";
+                    mText.getText() + "</pre></body></html>";
             webView.loadDataWithBaseURL(null, htmlDocument, "text/HTML", "UTF-8", null);
-
             mWebView = webView;
         }
-
     }
 
     @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
     private void createWebPrintJob(WebView webView) {
-
-        // Get a PrintManager instance
-        PrintManager printManager = null;
-        printManager = (PrintManager) this.getSystemService(Context.PRINT_SERVICE);
-
+        PrintManager printManager = (PrintManager) this.getSystemService(Context.PRINT_SERVICE);
         String jobName = getString(R.string.app_name) + " Document";
-
-        // Get a print adapter instance
         PrintDocumentAdapter printAdapter = webView.createPrintDocumentAdapter(jobName);
-
-        // Create a print job with name and adapter instance
-        PrintJob printJob = printManager.print(jobName, printAdapter,
-                new PrintAttributes.Builder().build());
-
-        // Save the job object for later status checking
+        PrintJob printJob = printManager.print(jobName, printAdapter, new PrintAttributes.Builder().build());
         List<PrintJob> printJobs = new ArrayList<>();
         printJobs.add(printJob);
     }
 
     private void shareText() {
-        String textToShare = this.mText.getText().toString();
         Intent sendIntent = new Intent();
         sendIntent.setAction(Intent.ACTION_SEND);
-        sendIntent.putExtra(Intent.EXTRA_TEXT, textToShare);
+        sendIntent.putExtra(Intent.EXTRA_TEXT, this.mText.getText().toString());
         sendIntent.setType("text/plain");
-
-        Intent shareIntent = Intent.createChooser(sendIntent, null);
-        startActivity(shareIntent);
+        startActivity(Intent.createChooser(sendIntent, null));
     }
 
     private void showSettings() {
@@ -1316,132 +1341,20 @@ public class EditorActivity extends AppCompatActivity {
                     .setIcon(android.R.drawable.ic_dialog_alert)
                     .setTitle(R.string.File_not_saved)
                     .setMessage(R.string.Save_current_file)
-                    .setPositiveButton(R.string.Yes,
-                            (dialog, which) -> {
-                                // Stop the activity
-                                next_action = DO_SHOW_SETTINGS;
-                                saveFile();
-                            })
-                    .setNegativeButton(R.string.No,
-                            (dialog, which) -> showSettingsActivity()).show();
+                    .setPositiveButton(R.string.Yes, (dialog, which) -> {
+                        next_action = DO_SHOW_SETTINGS;
+                        saveFile();
+                    })
+                    .setNegativeButton(R.string.No, (dialog, which) -> showSettingsActivity())
+                    .show();
         } else {
             showSettingsActivity();
         }
     }
 
     private void showSettingsActivity() {
-        Intent intent = new Intent(this.getBaseContext(),
-                SettingsActivity.class);
+        Intent intent = new Intent(this.getBaseContext(), SettingsActivity.class);
         this.startActivityForResult(intent, REQUEST_SETTINGS);
-    }
-
-    private void openRecentFile(int i) {
-        ArrayList<String> lastFiles = recentFilesService.getLastFiles(1, getApplicationContext());
-        if (i >= lastFiles.size()) {
-            return;
-        }
-        final String filename = lastFiles.get(i);
-        if (changed) {
-            new AlertDialog.Builder(this)
-                    .setIcon(android.R.drawable.ic_dialog_alert)
-                    .setTitle(R.string.File_not_saved)
-                    .setMessage(R.string.Save_current_file)
-                    .setPositiveButton(R.string.Yes,
-                            (dialog, which) -> {
-                                // Stop the activity
-                                next_action = DO_OPEN_RECENT;
-                                next_action_filename = filename;
-                                EditorActivity.this.saveFile();
-                            })
-                    .setNegativeButton(R.string.No,
-                            (dialog, which) -> {
-                                discardCurrentRecovery();
-                                openFileByName(filename);
-                            }).show();
-        } else {
-            openFileByName(filename);
-        }
-    }
-
-    private void openFileByName(String filename) {
-        if (useAndroidManager()) {
-            Uri uri = Uri.parse(filename);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) { //duplicated in useAndroidManager
-                this.openNamedFile(uri);
-            }
-        } else {
-            this.openNamedFileLegacy(filename);
-        }
-    }
-
-    public void newFile() {
-        if (changed) {
-            new AlertDialog.Builder(this)
-                    .setIcon(android.R.drawable.ic_dialog_alert)
-                    .setTitle(R.string.File_not_saved)
-                    .setMessage(R.string.Save_current_file)
-                    .setPositiveButton(R.string.Yes,
-                            (dialog, which) -> {
-                                // Stop the activity
-                                next_action = DO_NEW;
-                                EditorActivity.this.saveFile();
-                            })
-                    .setNegativeButton(R.string.No,
-                            (dialog, which) -> clearFile()).show();
-        } else {
-            clearFile();
-        }
-    }
-
-    public void clearFile() {
-        discardCurrentRecovery();
-        editorGeneration = 0;
-        originalSize = null;
-        originalLastModified = null;
-        originalContentSha256 = null;
-        selectionStart = 0;
-        selectionEnd = 0;
-        setEditorText(TPStrings.EMPTY, false);
-        setFilename(TPStrings.EMPTY);
-        initEditor();
-        // Update edit tab display name with generated filename
-        tabManager.getEditTab().displayName = EditorState.generateNewFileName();
-        updateTitle();
-    }
-
-    // public void clearFile() {
-    //     discardCurrentRecovery();
-    //     editorGeneration = 0;
-    //     originalSize = null;
-    //     originalLastModified = null;
-    //     originalContentSha256 = null;
-    //     selectionStart = 0;
-    //     selectionEnd = 0;
-    //     setEditorText(TPStrings.EMPTY, false);
-    //     setFilename(TPStrings.EMPTY);
-    //     initEditor();
-    //     updateTitle();
-    // }
-
-    private void discardCurrentRecovery() {
-        recoveryWriter.cancelAndWait(recoveryKey, editorGeneration, 2000);
-        recoveryRepository.delete(recoveryKey);
-        recoveryKey = null;
-    }
-
-    private void setFilename(String value) {
-        this.urlFilename = value;
-        storeLastFileName(value);
-    }
-
-    private void storeLastFileName(String value) {
-        if (isFilenameEmpty()) {
-            return;
-        }
-        if (!settingsService.isShowLastEditedFiles()) {
-            return;
-        }
-        recentFilesService.addRecentFile(value, getApplicationContext());
     }
 
     protected void initEditor() {
@@ -1450,72 +1363,8 @@ public class EditorActivity extends AppCompatActivity {
         queryTextListener = null;
     }
 
-    protected void editRedo() {
-        editTextUndoRedo.redo();
-    }
-
-    protected void editUndo() {
-        editTextUndoRedo.undo();
-    }
-
-    protected void saveAs() {
-        if (useAndroidManager()) {
-            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-            intent.addCategory(Intent.CATEGORY_OPENABLE);
-            intent.setType("*/*");
-            intent.putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes);
-            intent.putExtra(Intent.EXTRA_TITLE, TPStrings.NEW_FILE_TXT);
-            intent.putExtra("android.content.extra.SHOW_ADVANCED", true);
-            startActivityForResult(intent, ACTION_CREATE_FILE);
-        } else {
-            Intent intent = new Intent(this.getBaseContext(), FileDialog.class);
-            this.startActivityForResult(intent, REQUEST_SAVE);
-        }
-    }
-
-    protected void openFile() {
-        if (changed) {
-            new AlertDialog.Builder(this)
-                    .setIcon(android.R.drawable.ic_dialog_alert)
-                    .setTitle(R.string.File_not_saved)
-                    .setMessage(R.string.Save_current_file)
-                    .setPositiveButton(R.string.Yes,
-                            (dialog, which) -> {
-                                // Stop the activity
-                                next_action = DO_OPEN;
-                                saveFile();
-                            })
-                    .setNegativeButton(R.string.No,
-                            (dialog, which) -> {
-                                discardCurrentRecovery();
-                                openNewFile();
-                            }).show();
-        } else {
-            openNewFile();
-        }
-    }
-
-    protected void exitApplication() {
-        if (changed) {
-            new AlertDialog.Builder(this)
-                    .setIcon(android.R.drawable.ic_dialog_alert)
-                    .setTitle(R.string.File_not_saved)
-                    .setMessage(R.string.Save_current_file)
-                    .setPositiveButton(R.string.Yes,
-                            (dialog, which) -> {
-                                // Stop the activity
-                                next_action = DO_EXIT;
-                                EditorActivity.this.saveFile();
-                            })
-                    .setNegativeButton(R.string.No,
-                            (dialog, which) -> {
-                                discardCurrentRecovery();
-                                System.exitFromApp(EditorActivity.this);
-                            }).show();
-        } else {
-            System.exitFromApp(EditorActivity.this);
-        }
-    }
+    protected void editRedo() { editTextUndoRedo.redo(); }
+    protected void editUndo() { editTextUndoRedo.undo(); }
 
     protected void selectFileUsingAndroidSystemPicker() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
@@ -1537,37 +1386,17 @@ public class EditorActivity extends AppCompatActivity {
         }
     }
 
-    protected void saveFile() {
-        if (isFilenameEmpty()) {
-            saveAs();
-        } else {
-            saveFileIfNamed();
-        }
-    }
-
-    protected void saveFileIfNamed() {
-        saveFileIfNamed(false);
-    }
-
-    private void saveFileIfNamed(boolean autosave) {
-        guardedSaveNamedFile(autosave);
-    }
-
     protected void saveFileWithConfirmation() {
         if (this.fileAlreadyExists()) {
             new AlertDialog.Builder(this)
                     .setIcon(android.R.drawable.ic_dialog_alert)
                     .setTitle(R.string.File_already_exists)
                     .setMessage(R.string.Existing_file_will_be_overwritten)
-                    .setPositiveButton(R.string.Yes,
-                            (dialog, which) -> {
-                                // Stop the activity
-                                next_action = DO_OPEN;
-                                EditorActivity.this.saveFile();
-                            }).setNegativeButton(R.string.No,
-                            (dialog, which) -> {
-                                nextSaveCreatesDocument = false;
-                            })
+                    .setPositiveButton(R.string.Yes, (dialog, which) -> {
+                        next_action = DO_OPEN;
+                        EditorActivity.this.saveFile();
+                    })
+                    .setNegativeButton(R.string.No, (dialog, which) -> nextSaveCreatesDocument = false)
                     .setOnCancelListener(dialog -> nextSaveCreatesDocument = false)
                     .show();
         } else {
@@ -1580,38 +1409,27 @@ public class EditorActivity extends AppCompatActivity {
         return f.exists();
     }
 
-    protected void saveNamedFileLegacy() {
-        guardedSaveNamedFile(false);
-    }
+    protected void saveNamedFileLegacy() { guardedSaveNamedFile(false); }
 
     protected void saveFile(Uri uri) throws IOException {
         ContentResolver contentResolver = getContentResolver();
         OutputStream outputStream = contentResolver.openOutputStream(uri, "wt");
-        if (outputStream == null) {
-            throw new IOException();
-        }
-
+        if (outputStream == null) throw new IOException();
         try {
-            String s = this.mText.getText().toString();
-
-            s = applyEndings(s);
-
+            String s = applyEndings(this.mText.getText().toString());
             outputStream.write(s.getBytes(settingsService.getFileEncoding()));
         } finally {
             outputStream.close();
         }
     }
 
-    protected void saveNamedFile() {
-        guardedSaveNamedFile(false);
-    }
+    protected void saveNamedFile() { guardedSaveNamedFile(false); }
 
     private void guardedSaveNamedFile(boolean autosave) {
         try {
             String persistedText = applyEndings(mText.getText().toString());
             SaveRequest request = new SaveRequest(
-                    editorGeneration,
-                    recoveryKey,
+                    editorGeneration, recoveryKey,
                     persistedText.getBytes(settingsService.getFileEncoding())
             );
             boolean creatingDocument = nextSaveCreatesDocument || originalContentSha256 == null;
@@ -1620,13 +1438,9 @@ public class EditorActivity extends AppCompatActivity {
                 writeAndComplete(request);
                 return;
             }
-
             byte[] currentBytes = readNamedDocumentBytes();
             DocumentSaveValidator.Outcome outcome = DocumentSaveValidator.classify(
-                    currentBytes,
-                    originalContentSha256,
-                    request.bytes
-            );
+                    currentBytes, originalContentSha256, request.bytes);
             if (outcome == DocumentSaveValidator.Outcome.BASELINE_MATCH) {
                 writeAndComplete(request);
             } else if (outcome == DocumentSaveValidator.Outcome.INTENDED_CONTENT_MATCH) {
@@ -1634,9 +1448,7 @@ public class EditorActivity extends AppCompatActivity {
             } else if (outcome == DocumentSaveValidator.Outcome.CONFLICT) {
                 pendingExternalConflict = request;
                 flushRecoverySnapshot();
-                if (!autosave) {
-                    showExternalChangeDialog(request);
-                }
+                if (!autosave) showExternalChangeDialog(request);
             } else {
                 showToast(R.string.Can_not_read_file);
             }
@@ -1656,16 +1468,11 @@ public class EditorActivity extends AppCompatActivity {
         } else {
             inputStream = new FileInputStream(new File(getFilename()));
         }
-        if (inputStream == null) {
-            throw new IOException("Document cannot be opened for validation");
-        }
-        try (InputStream input = inputStream;
-             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+        if (inputStream == null) throw new IOException("Document cannot be opened for validation");
+        try (InputStream input = inputStream; ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             byte[] buffer = new byte[8192];
             int count;
-            while ((count = input.read(buffer)) != -1) {
-                output.write(buffer, 0, count);
-            }
+            while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
             return output.toByteArray();
         }
     }
@@ -1673,22 +1480,13 @@ public class EditorActivity extends AppCompatActivity {
     private void writeNamedDocumentBytes(byte[] bytes) throws IOException {
         if (useAndroidManager()) {
             OutputStream output = getContentResolver().openOutputStream(Uri.parse(getFilename()), "wt");
-            if (output == null) {
-                throw new IOException("Document cannot be opened for writing");
-            }
-            try (OutputStream closeable = output) {
-                closeable.write(bytes);
-            }
+            if (output == null) throw new IOException("Document cannot be opened for writing");
+            try (OutputStream closeable = output) { closeable.write(bytes); }
             return;
         }
-
         File file = new File(getFilename());
-        if (!file.exists() && !file.createNewFile()) {
-            throw new IOException("Document cannot be created");
-        }
-        try (FileOutputStream output = new FileOutputStream(file)) {
-            output.write(bytes);
-        }
+        if (!file.exists() && !file.createNewFile()) throw new IOException("Document cannot be created");
+        try (FileOutputStream output = new FileOutputStream(file)) { output.write(bytes); }
     }
 
     private void writeAndComplete(SaveRequest request) throws IOException {
@@ -1708,63 +1506,34 @@ public class EditorActivity extends AppCompatActivity {
 
     private void finishSuccessfulSave(long savedGeneration) {
         showToast(R.string.File_Written);
-        if (editorGeneration == savedGeneration) {
-            initEditor();
-        }
+        if (editorGeneration == savedGeneration) initEditor();
         updateTitle();
-
-        if (next_action == DO_OPEN) {
-            next_action = DO_NOTHING;
-            openNewFile();
-        } else if (next_action == DO_NEW) {
-            next_action = DO_NOTHING;
-            clearFile();
-        } else if (next_action == DO_SHOW_SETTINGS) {
-            next_action = DO_NOTHING;
-            showSettingsActivity();
-        } else if (next_action == DO_OPEN_RECENT) {
-            next_action = DO_NOTHING;
-            openFileByName(next_action_filename);
-        } else if (next_action == DO_OPEN_IN_EDIT) {
-            next_action = DO_NOTHING;
-            if (pendingCloseReadOnlyTabIndex > 0) {
-                tabManager.removeReadOnlyTab(pendingCloseReadOnlyTabIndex);
-                pendingCloseReadOnlyTabIndex = -1;
-            }
-            openFileByName(next_action_filename);
-        } else if (next_action == DO_EXIT) {
-            next_action = DO_NOTHING;
-            exitApplication();
+        if (next_action == DO_OPEN) { next_action = DO_NOTHING; openNewFile();
+        } else if (next_action == DO_NEW) { next_action = DO_NOTHING; clearFile();
+        } else if (next_action == DO_SHOW_SETTINGS) { next_action = DO_NOTHING; showSettingsActivity();
+        } else if (next_action == DO_OPEN_RECENT) { next_action = DO_NOTHING; openFileByName(next_action_filename);
+        } else if (next_action == DO_EXIT) { next_action = DO_NOTHING; exitApplication();
         }
     }
 
     private void showExternalChangeDialog(SaveRequest request) {
-        if (isFinishing() || request != pendingExternalConflict) {
-            return;
-        }
+        if (isFinishing() || request != pendingExternalConflict) return;
         new AlertDialog.Builder(this)
                 .setTitle(R.string.External_change_detected)
                 .setMessage(getString(R.string.External_change_message, currentDisplayName()))
                 .setPositiveButton(R.string.Overwrite, (dialog, which) -> overwriteAfterConflict(request))
                 .setNegativeButton(R.string.Reload, (dialog, which) -> confirmReloadExternal(request))
                 .setNeutralButton(R.string.Save_As, (dialog, which) -> saveAs())
-                .setOnCancelListener(dialog -> {
-                    pendingExternalConflict = request;
-                    flushRecoverySnapshot();
-                })
+                .setOnCancelListener(dialog -> { pendingExternalConflict = request; flushRecoverySnapshot(); })
                 .show();
     }
 
     private void overwriteAfterConflict(SaveRequest request) {
         try {
-            // Confirm that the target is still readable immediately before the authorized overwrite.
             readNamedDocumentBytes();
             writeAndComplete(request);
-        } catch (FileNotFoundException error) {
-            showToast(R.string.File_not_found);
-        } catch (IOException error) {
-            showToast(R.string.Can_not_write_file);
-        }
+        } catch (FileNotFoundException error) { showToast(R.string.File_not_found);
+        } catch (IOException error) { showToast(R.string.Can_not_write_file); }
     }
 
     private void confirmReloadExternal(SaveRequest request) {
@@ -1772,14 +1541,8 @@ public class EditorActivity extends AppCompatActivity {
                 .setTitle(R.string.Reload_external_title)
                 .setMessage(R.string.Reload_external_message)
                 .setPositiveButton(R.string.Reload, (dialog, which) -> reloadExternalDocument(request))
-                .setNegativeButton(R.string.Cancel, (dialog, which) -> {
-                    pendingExternalConflict = request;
-                    flushRecoverySnapshot();
-                })
-                .setOnCancelListener(dialog -> {
-                    pendingExternalConflict = request;
-                    flushRecoverySnapshot();
-                })
+                .setNegativeButton(R.string.Cancel, (dialog, which) -> { pendingExternalConflict = request; flushRecoverySnapshot(); })
+                .setOnCancelListener(dialog -> { pendingExternalConflict = request; flushRecoverySnapshot(); })
                 .show();
     }
 
@@ -1790,38 +1553,25 @@ public class EditorActivity extends AppCompatActivity {
             recoveryRepository.delete(request.recoveryKey);
             pendingExternalConflict = null;
             applyExternalDocument(externalBytes);
-        } catch (FileNotFoundException error) {
-            showToast(R.string.File_not_found);
-            pendingExternalConflict = request;
-        } catch (Exception error) {
-            showToast(R.string.Can_not_read_file);
-            pendingExternalConflict = request;
-        }
+        } catch (FileNotFoundException error) { showToast(R.string.File_not_found); pendingExternalConflict = request;
+        } catch (Exception error) { showToast(R.string.Can_not_read_file); pendingExternalConflict = request; }
     }
 
     private void validateOpenDocumentOnForeground() {
-        if (isFilenameEmpty() || originalContentSha256 == null || pendingExternalConflict != null) {
-            return;
-        }
+        if (isFilenameEmpty() || originalContentSha256 == null || pendingExternalConflict != null) return;
         try {
             byte[] currentBytes = readNamedDocumentBytes();
-            if (originalContentSha256.equals(DocumentSaveValidator.sha256(currentBytes))) {
-                return;
-            }
+            if (originalContentSha256.equals(DocumentSaveValidator.sha256(currentBytes))) return;
             if (!changed) {
                 applyExternalDocument(currentBytes);
                 showToast(R.string.File_reloaded_after_external_change);
                 return;
             }
-
             byte[] intendedBytes = applyEndings(mText.getText().toString())
                     .getBytes(settingsService.getFileEncoding());
             SaveRequest request = new SaveRequest(editorGeneration, recoveryKey, intendedBytes);
             DocumentSaveValidator.Outcome outcome = DocumentSaveValidator.classify(
-                    currentBytes,
-                    originalContentSha256,
-                    intendedBytes
-            );
+                    currentBytes, originalContentSha256, intendedBytes);
             if (outcome == DocumentSaveValidator.Outcome.INTENDED_CONTENT_MATCH) {
                 completeEquivalentSave(request, currentBytes);
             } else if (outcome == DocumentSaveValidator.Outcome.CONFLICT) {
@@ -1829,9 +1579,7 @@ public class EditorActivity extends AppCompatActivity {
                 flushRecoverySnapshot();
                 mText.post(() -> showExternalChangeDialog(request));
             }
-        } catch (Exception error) {
-            // Foreground validation is best effort. Save repeats the mandatory validation.
-        }
+        } catch (Exception error) { /* best effort */ }
     }
 
     private void applyExternalDocument(byte[] externalBytes) throws Exception {
@@ -1839,161 +1587,116 @@ public class EditorActivity extends AppCompatActivity {
         externalText = toUnixEndings(externalText);
         setEditorText(externalText, false);
         initEditor();
-        recordLoadedDocument(
-                externalBytes,
-                useAndroidManager() ? null : new File(getFilename()).lastModified()
-        );
+        recordLoadedDocument(externalBytes,
+                useAndroidManager() ? null : new File(getFilename()).lastModified());
         updateTitle();
     }
 
     private void validateRestoredDraft() {
-        if (!changed || isFilenameEmpty() || originalContentSha256 == null) {
-            return;
-        }
+        if (!changed || isFilenameEmpty() || originalContentSha256 == null) return;
         try {
             byte[] intendedBytes = applyEndings(mText.getText().toString())
                     .getBytes(settingsService.getFileEncoding());
             SaveRequest request = new SaveRequest(editorGeneration, recoveryKey, intendedBytes);
             byte[] currentBytes = readNamedDocumentBytes();
             DocumentSaveValidator.Outcome outcome = DocumentSaveValidator.classify(
-                    currentBytes,
-                    originalContentSha256,
-                    intendedBytes
-            );
+                    currentBytes, originalContentSha256, intendedBytes);
             if (outcome == DocumentSaveValidator.Outcome.INTENDED_CONTENT_MATCH) {
                 completeEquivalentSave(request, currentBytes);
             } else if (outcome == DocumentSaveValidator.Outcome.CONFLICT) {
                 pendingExternalConflict = request;
                 showExternalChangeDialog(request);
             }
-        } catch (Exception error) {
-            // Keep the restored local draft; a later Save will retry validation and report failure.
-        }
+        } catch (Exception error) { /* keep restored draft */ }
     }
 
-    private void completeSuccessfulSave(
-            long savedGeneration,
-            String previousRecoveryKey,
-            byte[] persistedBytes,
-            Long lastModified
-    ) {
+    private void completeSuccessfulSave(long savedGeneration, String previousRecoveryKey,
+            byte[] persistedBytes, Long lastModified) {
         String identity = documentIdentityUri();
         String targetKey = identity == null ? null : RecoveryKeys.forDocumentUri(identity);
         originalSize = (long) persistedBytes.length;
         originalLastModified = lastModified;
         originalContentSha256 = DocumentSaveValidator.sha256(persistedBytes);
-
         if (editorGeneration == savedGeneration) {
             recoveryWriter.cancelAndWait(previousRecoveryKey, savedGeneration, 2000);
             recoveryRepository.delete(previousRecoveryKey);
-            if (targetKey != null && !targetKey.equals(previousRecoveryKey)) {
+            if (targetKey != null && !targetKey.equals(previousRecoveryKey))
                 recoveryRepository.delete(targetKey);
-            }
             recoveryKey = targetKey;
             return;
         }
-
         if (previousRecoveryKey != null && identity != null && !targetKey.equals(previousRecoveryKey)) {
-            try {
-                recoveryRepository.migrate(previousRecoveryKey, identity, currentDisplayName());
-            } catch (Exception ignored) {
-                // The previous valid draft remains available if migration fails.
-            }
+            try { recoveryRepository.migrate(previousRecoveryKey, identity, currentDisplayName());
+            } catch (Exception ignored) {}
         }
         recoveryKey = targetKey;
         scheduleRecoverySnapshot();
     }
 
+    private void discardCurrentRecovery() {
+        recoveryWriter.cancelAndWait(recoveryKey, editorGeneration, 2000);
+        recoveryRepository.delete(recoveryKey);
+        recoveryKey = null;
+    }
+
     protected void openNamedFileLegacy(String filename) {
         String identity = Uri.fromFile(new File(filename)).toString();
         RecoveryDraft draft = recoveryRepository.load(RecoveryKeys.forDocumentUri(identity), identity);
-        if (draft != null) {
-            showRecoveryDialog(draft, () -> openNamedFileLegacyDirect(filename));
-        } else {
-            openNamedFileLegacyDirect(filename);
-        }
+        if (draft != null) showRecoveryDialog(draft, () -> openNamedFileLegacyDirect(filename));
+        else openNamedFileLegacyDirect(filename);
     }
 
     private void openNamedFileLegacyDirect(String filename) {
         try {
             File f = new File(filename);
             FileInputStream fis = new FileInputStream(f);
-
             long size = f.length();
             DataInputStream dis = new DataInputStream(fis);
             byte[] b = new byte[(int) size];
             int length = dis.read(b, 0, (int) size);
-
-            dis.close();
-            fis.close();
-
-            String ttt = new String(b, 0, length,
-                    settingsService.getFileEncoding());
-
-            ttt = toUnixEndings(ttt);
-
+            dis.close(); fis.close();
+            String ttt = toUnixEndings(new String(b, 0, length, settingsService.getFileEncoding()));
             setEditorText(ttt, false);
-
             showToast(getBaseContext().getResources().getString(R.string.File_opened_, filename));
             initEditor();
             this.setFilename(filename);
             recordLoadedDocument(b, f.lastModified());
-            if (!settingsService.getLastFilename().equals(filename)) {
+            if (!settingsService.getLastFilename().equals(filename))
                 settingsService.setLastFilename(filename, this.getApplicationContext());
-            }
             updateTitle();
-        } catch (FileNotFoundException e) {
-            this.showToast(R.string.File_not_found);
-        } catch (IOException e) {
-            this.showToast(R.string.Can_not_read_file);
-        } catch (Exception e) {
-            this.showToast(R.string.Can_not_read_file);
-        }
-
+        } catch (FileNotFoundException e) { this.showToast(R.string.File_not_found);
+        } catch (IOException e) { this.showToast(R.string.Can_not_read_file);
+        } catch (Exception e) { this.showToast(R.string.Can_not_read_file); }
     }
 
     @RequiresApi(api = Build.VERSION_CODES.KITKAT)
     protected void openNamedFile(final Uri uri) {
         String identity = uri.toString();
         RecoveryDraft draft = recoveryRepository.load(RecoveryKeys.forDocumentUri(identity), identity);
-        if (draft != null) {
-            showRecoveryDialog(draft, () -> openNamedFileDirect(uri));
-        } else {
-            openNamedFileDirect(uri);
-        }
+        if (draft != null) showRecoveryDialog(draft, () -> openNamedFileDirect(uri));
+        else openNamedFileDirect(uri);
     }
 
     @RequiresApi(api = Build.VERSION_CODES.KITKAT)
     private void openNamedFileDirect(final Uri uri) {
         try {
             ContentResolver contentResolver = getContentResolver();
-
             InputStream inputStream = contentResolver.openInputStream(uri);
-            if (inputStream == null) {
-                throw new IOException();
-            }
+            if (inputStream == null) throw new IOException();
             ByteArrayOutputStream bytes = new ByteArrayOutputStream(Math.max(8192, inputStream.available()));
             byte[] buffer = new byte[8192];
             int count;
-            while ((count = inputStream.read(buffer)) != -1) {
-                bytes.write(buffer, 0, count);
-            }
+            while ((count = inputStream.read(buffer)) != -1) bytes.write(buffer, 0, count);
             byte[] b = bytes.toByteArray();
-
-            String ttt = new String(b, settingsService.getFileEncoding());
-            ttt = toUnixEndings(ttt);
-
+            String ttt = toUnixEndings(new String(b, settingsService.getFileEncoding()));
             inputStream.close();
-
             setEditorText(ttt, false);
-
             showToast(getBaseContext().getResources().getString(R.string.File_opened_, getFilename()));
             initEditor();
             setFilename(uri.toString());
             recordLoadedDocument(b, null);
-            if (!settingsService.getLastFilename().equals(getFilename())) {
+            if (!settingsService.getLastFilename().equals(getFilename()))
                 settingsService.setLastFilename(getFilename(), this.getApplicationContext());
-            }
             if (lastTriedSystemUri != null) {
                 alternativeUrlsService.addAlternativeUrl(lastTriedSystemUri, uri, getApplicationContext());
                 lastTriedSystemUri = null;
@@ -2001,82 +1704,44 @@ public class EditorActivity extends AppCompatActivity {
             updateTitle();
             detectReadOnlyAccess(uri);
         } catch (FileNotFoundException e) {
-            if (isAccessDeniedException(e)) {
-                showAlternativeFileDialog(uri);
-            } else {
-                this.showToast(R.string.File_not_found);
-            }
-        } catch (Exception e) {
-            this.showToast(R.string.Can_not_read_file);
-        }
+            if (isAccessDeniedException(e)) showAlternativeFileDialog(uri);
+            else this.showToast(R.string.File_not_found);
+        } catch (Exception e) { this.showToast(R.string.Can_not_read_file); }
     }
 
     private void detectReadOnlyAccess(final Uri uri) {
         boolean isReadOnly = false;
-
         try {
-            // Try opening the file with write mode
             ParcelFileDescriptor pfdWrite = getContentResolver().openFileDescriptor(uri, "rw");
-            if (pfdWrite == null) {
-                isReadOnly = true;
-            } else {
-                pfdWrite.close(); // Close it if opened successfully
-            }
-        } catch (Exception e) {
-            isReadOnly = true;
-        }
-
-        if (isReadOnly) {
-            new Handler().postDelayed(this::showReadOnlyDialog, 1000);
-        }
-
+            if (pfdWrite == null) isReadOnly = true;
+            else pfdWrite.close();
+        } catch (Exception e) { isReadOnly = true; }
+        if (isReadOnly) new Handler().postDelayed(this::showReadOnlyDialog, 1000);
     }
 
     public void showReadOnlyDialog() {
         Context context = this;
-        // Message text with a clickable link
-        SpannableString spannableMessage = new SpannableString(getString(R.string.readOnlyDialogMessage) + ' ' + getString(R.string.readOnlyDialogClickHere));
-
-        // Set the clickable part
+        SpannableString spannableMessage = new SpannableString(
+                getString(R.string.readOnlyDialogMessage) + ' ' + getString(R.string.readOnlyDialogClickHere));
         ClickableSpan clickableSpan = new ClickableSpan() {
-            @Override
-            public void onClick(View textView) {
-                // Open the link in an external browser
-                Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://simpleditor.org/faq/"));
-                context.startActivity(browserIntent);
+            @Override public void onClick(View textView) {
+                context.startActivity(new Intent(Intent.ACTION_VIEW,
+                        Uri.parse("https://simpleditor.org/faq/")));
             }
         };
-        // would it work for reverse languages?
-        spannableMessage.setSpan(clickableSpan, spannableMessage.length() - getString(R.string.readOnlyDialogClickHere).length(), spannableMessage.length(), 0);
-        spannableMessage.setSpan(new UnderlineSpan(), spannableMessage.length() - getString(R.string.readOnlyDialogClickHere).length(), spannableMessage.length(), 0);
-
-        // Creating the AlertDialog
+        int linkStart = spannableMessage.length() - getString(R.string.readOnlyDialogClickHere).length();
+        spannableMessage.setSpan(clickableSpan, linkStart, spannableMessage.length(), 0);
+        spannableMessage.setSpan(new UnderlineSpan(), linkStart, spannableMessage.length(), 0);
         AlertDialog.Builder builder = new AlertDialog.Builder(context);
         builder.setTitle(R.string.readOnlyDialogTitle);
-
-        // Including the message and link in the dialog
         builder.setMessage(spannableMessage);
         builder.setCancelable(true);
-
-        // Setting the dialog buttons
-        builder.setPositiveButton(R.string.readOnlyDialogButtonOpenAgain, new DialogInterface.OnClickListener() {
-            @Override
-            public void onClick(DialogInterface dialog, int which) {
-                openFile();
-            }
-        });
-
-        builder.setNegativeButton(R.string.readOnlyDialogButtonContinue, new DialogInterface.OnClickListener() {
-            @Override
-            public void onClick(DialogInterface dialog, int which) {
-                dialog.dismiss();
-            }
-        });
-
+        builder.setPositiveButton(R.string.readOnlyDialogButtonOpenAgain,
+                (dialog, which) -> openFile());
+        builder.setNegativeButton(R.string.readOnlyDialogButtonContinue,
+                (dialog, which) -> dialog.dismiss());
         AlertDialog dialog = builder.create();
         dialog.show();
-
-        // Make the link clickable
         ((TextView) dialog.findViewById(android.R.id.message)).setMovementMethod(LinkMovementMethod.getInstance());
     }
 
@@ -2093,43 +1758,22 @@ public class EditorActivity extends AppCompatActivity {
                     lastTriedSystemUri = null;
                     EditorActivity.super.onBackPressed();
                 })
-                .create()
-                .show();
+                .create().show();
     }
 
     private boolean isAccessDeniedException(FileNotFoundException e) {
-        if (!settingsService.isAlternativeFileAccess()) {
-            return false;
-        }
+        if (!settingsService.isAlternativeFileAccess()) return false;
         String message = e.getMessage();
-        if (message == null) {
-            return false;
-        }
-        return (message.contains("EACCES"));
+        return message != null && message.contains("EACCES");
     }
 
-    /**
-     * @param value String to fix
-     * @return Fixed String
-     */
     String applyEndings(String value) {
-        String to = settingsService.getDelimiters();
-        value = TextConverter.getInstance().applyEndings(value, to);
-        return value;
+        return TextConverter.getInstance().applyEndings(value, settingsService.getDelimiters());
     }
 
-    /**
-     * @param value Value
-     * @return String
-     */
     String toUnixEndings(String value) {
         String from = settingsService.getDelimiters();
-        if (TPStrings.DEFAULT.equals(from)) {
-            return value; //this way we spare memory but will be unable to fix delimiters
-        }
-
-        //we should anyway fix any line delimiters
-        //replace \r\n first, then \r into \n this way we will get pure unix ending used in android
+        if (TPStrings.DEFAULT.equals(from)) return value;
         return TextConverter.getInstance().applyEndings(value, TextConverter.UNIX);
     }
 
@@ -2137,274 +1781,113 @@ public class EditorActivity extends AppCompatActivity {
         return settingsService.getSearchSelectionColor();
     }
 
-    /**
-     * Opens a file as a read-only tab without affecting the edit tab.
-     */
-    @RequiresApi(api = Build.VERSION_CODES.KITKAT)
-    private void openNamedFileAsReadOnly(final Uri uri) {
-        try {
-            ContentResolver contentResolver = getContentResolver();
-            InputStream inputStream = contentResolver.openInputStream(uri);
-            if (inputStream == null) throw new IOException();
-
-            ByteArrayOutputStream bytes = new ByteArrayOutputStream(
-                    Math.max(8192, inputStream.available()));
-            byte[] buffer = new byte[8192];
-            int count;
-            while ((count = inputStream.read(buffer)) != -1) {
-                bytes.write(buffer, 0, count);
-            }
-            byte[] b = bytes.toByteArray();
-            inputStream.close();
-
-            String content = new String(b, settingsService.getFileEncoding());
-            content = toUnixEndings(content);
-
-            String filename = uri.toString();
-            String displayName = FileNameHelper.getFilenameByUri(this, uri);
-
-            // Check if already open
-            if (tabManager.isAlreadyOpen(filename)) {
-                showToast(displayName + " is already open");
-                int existingIndex = tabManager.findByFilename(filename);
-                switchToTab(existingIndex);
-                return;
-            }
-
-            EditorState readOnlyState = EditorState.newReadOnlyTab(filename, displayName, content);
-            boolean added = tabManager.addReadOnlyTab(readOnlyState);
-            if (!added) {
-                showToast("Maximum tabs reached. Close a tab first.");
-                return;
-            }
-
-            // Switch to the new read-only tab
-            int newIndex = tabManager.findByFilename(filename);
-            loadTab(newIndex);
-            showToast(getString(R.string.File_opened_, displayName));
-
-        } catch (FileNotFoundException e) {
-            showToast(R.string.File_not_found);
-        } catch (Exception e) {
-            showToast(R.string.Can_not_read_file);
-        }
-    }
-
-    /**
-     *
-     */
-    @SuppressLint("WrongConstant")
-    public synchronized void onActivityResult(
-            final int requestCode,
-            int resultCode,
-            final Intent data
-    ) {
-
-        if (requestCode == REQUEST_SAVE) {
-            if (resultCode == Activity.RESULT_OK) {
-                setFilename(
-                        data.getStringExtra(TPStrings.RESULT_PATH)
-                );
-                nextSaveCreatesDocument = true;
-                this.saveFileWithConfirmation();
-            } else if (resultCode == Activity.RESULT_CANCELED) {
-                showToast(R.string.Operation_Canceled);
-            }
-        } else if (requestCode == REQUEST_OPEN) {
-            if (resultCode == Activity.RESULT_OK) {
-                this.openNamedFileLegacy(data.getStringExtra(TPStrings.RESULT_PATH));
-            } else if (resultCode == Activity.RESULT_CANCELED) {
-                showToast(R.string.Operation_Canceled);
-            }
-        } else if (requestCode == REQUEST_SETTINGS) {
-            applyPreferences();
-        } else if (requestCode == ACTION_OPEN_FILE && resultCode == Activity.RESULT_OK) {
-            Uri uri;
-            if (data != null) {
-                uri = data.getData();
-                if (uri != null) {
-                    persistUriPermissions(data);
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-                        if (openAsReadOnly) {
-                            openAsReadOnly = false;
-                            openNamedFileAsReadOnly(uri);
-                        } else {
-                            openNamedFile(uri);
-                        }
-                    }
-                }
-            }
-        } else if (requestCode == ACTION_CREATE_FILE) {
-            if (data != null) {
-                persistUriPermissions(data);
-                Uri uri = data.getData();
-                if (uri != null) {
-                    setFilename(uri.toString());
-                    nextSaveCreatesDocument = true;
-                    this.saveFileWithConfirmation();
-                }
-            }
-        }
-        super.onActivityResult(requestCode, resultCode, data);
-    }
-
     @SuppressLint("WrongConstant")
     private void persistUriPermissions(Intent data) {
-        // Check for the freshest data.
         Uri uri = data.getData();
-        if (uri == null) {
-            return;
-        }
+        if (uri == null) return;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
             int takeFlags = data.getFlags()
-                    & (Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                    & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
             getContentResolver().takePersistableUriPermission(uri, takeFlags);
         }
     }
 
     protected void showToast(int toast_str) {
-        Context context = getApplicationContext();
-        int duration = Toast.LENGTH_SHORT;
-        Toast toast = Toast.makeText(context, toast_str, duration);
-        toast.show();
+        Toast.makeText(getApplicationContext(), toast_str, Toast.LENGTH_SHORT).show();
     }
 
     protected void showToast(String toast_str) {
-        Context context = getApplicationContext();
-        int duration = Toast.LENGTH_SHORT;
-        Toast toast = Toast.makeText(context, toast_str, duration);
-        toast.show();
+        Toast.makeText(getApplicationContext(), toast_str, Toast.LENGTH_SHORT).show();
     }
 
-    // TwoFingerPanTouchListener
-    private class TwoFingerPanTouchListener implements View.OnTouchListener {
+    // ─────────────────────────────────────────────────────────────
+    // TwoFingerPanTouchListener (không thay đổi)
+    // ─────────────────────────────────────────────────────────────
 
+    private class TwoFingerPanTouchListener implements View.OnTouchListener {
         private boolean panningActive = false;
         private boolean panGestureOwned = false;
-        private float lastFocalX;
-        private float lastFocalY;
-        private int maxScrollX;
-        private int maxScrollY;
+        private float lastFocalX, lastFocalY;
+        private int maxScrollX, maxScrollY;
 
         @Override
         public boolean onTouch(View view, MotionEvent event) {
             switch (event.getActionMasked()) {
-                case MotionEvent.ACTION_DOWN:
-                    endPanGesture(view);
-                    return false;
+                case MotionEvent.ACTION_DOWN: endPanGesture(view); return false;
                 case MotionEvent.ACTION_POINTER_DOWN:
-                    if (event.getPointerCount() == 2) {
-                        startPanning(view, event);
-                    } else {
-                        stopActivePanning(view);
-                    }
+                    if (event.getPointerCount() == 2) startPanning(view, event);
+                    else stopActivePanning(view);
                     return panGestureOwned;
                 case MotionEvent.ACTION_MOVE:
-                    if (!panGestureOwned) {
-                        return false;
-                    }
-                    if (!panningActive) {
-                        return true;
-                    }
-                    if (event.getPointerCount() != 2) {
-                        stopActivePanning(view);
-                        return true;
-                    }
-                    float focalX = focalX(event);
-                    float focalY = focalY(event);
-                    panContent(
-                            Math.round(focalX - lastFocalX),
-                            Math.round(focalY - lastFocalY),
-                            maxScrollX,
-                            maxScrollY
-                    );
-                    lastFocalX = focalX;
-                    lastFocalY = focalY;
+                    if (!panGestureOwned) return false;
+                    if (!panningActive) return true;
+                    if (event.getPointerCount() != 2) { stopActivePanning(view); return true; }
+                    float focalX = focalX(event), focalY = focalY(event);
+                    panContent(Math.round(focalX - lastFocalX), Math.round(focalY - lastFocalY),
+                            maxScrollX, maxScrollY);
+                    lastFocalX = focalX; lastFocalY = focalY;
                     return true;
                 case MotionEvent.ACTION_POINTER_UP:
-                    if (panGestureOwned) {
-                        stopActivePanning(view);
-                        return true;
-                    }
+                    if (panGestureOwned) { stopActivePanning(view); return true; }
                     return false;
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
                     return endPanGesture(view);
-                default:
-                    return panGestureOwned;
+                default: return panGestureOwned;
             }
         }
 
         private void startPanning(View view, MotionEvent event) {
-            panningActive = true;
-            panGestureOwned = true;
+            panningActive = true; panGestureOwned = true;
             requestParentInterception(view, true);
-            lastFocalX = focalX(event);
-            lastFocalY = focalY(event);
+            lastFocalX = focalX(event); lastFocalY = focalY(event);
             Layout layout = mText.getLayout();
             maxScrollX = getMaxHorizontalScroll(layout);
             maxScrollY = calculateMaxVerticalScroll(layout);
         }
 
         private void stopActivePanning(View view) {
-            if (panningActive) {
-                requestParentInterception(view, false);
-            }
+            if (panningActive) requestParentInterception(view, false);
             panningActive = false;
         }
 
         private boolean endPanGesture(View view) {
             boolean shouldConsume = panGestureOwned || panningActive;
-            stopActivePanning(view);
-            panGestureOwned = false;
+            stopActivePanning(view); panGestureOwned = false;
             return shouldConsume;
         }
 
         private void requestParentInterception(View view, boolean disallow) {
             ViewParent parent = view.getParent();
-            if (parent != null) {
-                parent.requestDisallowInterceptTouchEvent(disallow);
-            }
+            if (parent != null) parent.requestDisallowInterceptTouchEvent(disallow);
         }
 
         private float focalX(MotionEvent event) {
             float sum = 0;
-            for (int i = 0; i < event.getPointerCount(); i++) {
-                sum += event.getX(i);
-            }
+            for (int i = 0; i < event.getPointerCount(); i++) sum += event.getX(i);
             return sum / event.getPointerCount();
         }
 
         private float focalY(MotionEvent event) {
             float sum = 0;
-            for (int i = 0; i < event.getPointerCount(); i++) {
-                sum += event.getY(i);
-            }
+            for (int i = 0; i < event.getPointerCount(); i++) sum += event.getY(i);
             return sum / event.getPointerCount();
         }
     }
 
     private void panContent(int deltaX, int deltaY, int maxScrollX, int maxScrollY) {
         int newX = clampScroll(mText.getScrollX() - deltaX, maxScrollX);
-
         if (simpleScrolling()) {
-            int newY = clampScroll(mText.getScrollY() - deltaY, maxScrollY);
-            mText.scrollTo(newX, newY);
+            mText.scrollTo(newX, clampScroll(mText.getScrollY() - deltaY, maxScrollY));
             return;
         }
-
-        if (scrollView != null) {
-            scrollView.scrollBy(0, -deltaY);
-        }
+        if (scrollView != null) scrollView.scrollBy(0, -deltaY);
         mText.scrollTo(newX, mText.getScrollY());
     }
 
     private int getMaxHorizontalScroll(Layout layout) {
         int editorWidth = mText.getWidth();
-        if (layout == null || editorWidth <= 0) {
-            return 0;
-        }
+        if (layout == null || editorWidth <= 0) return 0;
         if (horizontalScrollBoundsDirty || cachedHorizontalScrollEditorWidth != editorWidth) {
             cachedMaxHorizontalScroll = calculateMaxHorizontalScroll(layout, editorWidth);
             cachedHorizontalScrollEditorWidth = editorWidth;
@@ -2413,9 +1896,7 @@ public class EditorActivity extends AppCompatActivity {
         return cachedMaxHorizontalScroll;
     }
 
-    private void invalidateHorizontalScrollBounds() {
-        horizontalScrollBoundsDirty = true;
-    }
+    private void invalidateHorizontalScrollBounds() { horizontalScrollBoundsDirty = true; }
 
     public int getHorizontalScrollBoundsCalculationCountForTests() {
         return horizontalScrollBoundsCalculationCount;
@@ -2424,29 +1905,27 @@ public class EditorActivity extends AppCompatActivity {
     private int calculateMaxHorizontalScroll(Layout layout, int editorWidth) {
         horizontalScrollBoundsCalculationCount++;
         float maxLineWidth = 0;
-        for (int line = 0; line < layout.getLineCount(); line++) {
+        for (int line = 0; line < layout.getLineCount(); line++)
             maxLineWidth = Math.max(maxLineWidth, layout.getLineWidth(line));
-        }
         int contentWidth = (int) Math.ceil(maxLineWidth)
                 + mText.getTotalPaddingLeft() + mText.getTotalPaddingRight();
         return Math.max(0, contentWidth - editorWidth);
     }
 
     private int calculateMaxVerticalScroll(Layout layout) {
-        if (layout == null) {
-            return 0;
-        }
+        if (layout == null) return 0;
         int contentHeight = layout.getHeight()
                 + mText.getTotalPaddingTop() + mText.getTotalPaddingBottom();
         return Math.max(0, contentHeight - mText.getHeight());
     }
 
     private int clampScroll(int value, int max) {
-        int boundedMax = Math.max(0, max);
-        return Math.max(0, Math.min(value, boundedMax));
+        return Math.max(0, Math.min(value, Math.max(0, max)));
     }
 
-
+    // ─────────────────────────────────────────────────────────────
+    // QueryTextListener (không thay đổi)
+    // ─────────────────────────────────────────────────────────────
 
     private class QueryTextListener
             implements SearchView.OnQueryTextListener, MenuItem.OnActionExpandListener {
@@ -2458,36 +1937,22 @@ public class EditorActivity extends AppCompatActivity {
         private String currentQuery = "";
 
         public QueryTextListener() {
-            if (simpleScrolling()) {
-                height = linearLayout.getHeight();
-            } else {
-                height = scrollView.getHeight();
-            }
+            height = simpleScrolling() ? linearLayout.getHeight() : scrollView.getHeight();
             editable = mText.getEditableText();
         }
 
         @Override
         public boolean onQueryTextChange(String newText) {
             currentQuery = newText;
-            if (newText.length() == 0) {
-                index = 0;
-                editable.removeSpan(span);
-                return false;
-            }
+            if (newText.length() == 0) { index = 0; editable.removeSpan(span); return false; }
             try {
-                matcher = Pattern.compile(
-                    Pattern.quote(newText),
-                    Pattern.MULTILINE | Pattern.CASE_INSENSITIVE
-                ).matcher(editable);
-            } catch (Exception e) {
-                return false;
-            }
+                matcher = Pattern.compile(Pattern.quote(newText),
+                        Pattern.MULTILINE | Pattern.CASE_INSENSITIVE).matcher(editable);
+            } catch (Exception e) { return false; }
             if (matcher.find(index)) {
                 if (mText.getLayout() == null) return false;
                 doSearch();
-            } else {
-                index = 0;
-            }
+            } else { index = 0; }
             return true;
         }
 
@@ -2499,14 +1964,9 @@ public class EditorActivity extends AppCompatActivity {
                     if (mText.getLayout() == null) return false;
                     doSearch();
                 } else {
-                    Toast.makeText(
-                        EditorActivity.this,
-                        formatString(R.string.s_not_found, query),
-                        Toast.LENGTH_SHORT
-                    ).show();
-                    matcher.reset();
-                    index = 0;
-                    editable.removeSpan(span);
+                    Toast.makeText(EditorActivity.this,
+                            formatString(R.string.s_not_found, query), Toast.LENGTH_SHORT).show();
+                    matcher.reset(); index = 0; editable.removeSpan(span);
                 }
             }
             return true;
@@ -2516,19 +1976,12 @@ public class EditorActivity extends AppCompatActivity {
             index = matcher.start();
             int line = mText.getLayout().getLineForOffset(index);
             int pos = mText.getLayout().getLineBaseline(line);
-            if (simpleScrolling()) {
-                mText.scrollTo(0, pos - height / 2);
-            } else {
-                scrollView.smoothScrollTo(0, pos - height / 2);
-            }
-            editable.setSpan(span, matcher.start(), matcher.end(),
-                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            if (simpleScrolling()) mText.scrollTo(0, pos - height / 2);
+            else scrollView.smoothScrollTo(0, pos - height / 2);
+            editable.setSpan(span, matcher.start(), matcher.end(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
 
-        @Override
-        public boolean onMenuItemActionExpand(MenuItem menuItem) {
-            return true;
-        }
+        @Override public boolean onMenuItemActionExpand(MenuItem menuItem) { return true; }
 
         @Override
         public boolean onMenuItemActionCollapse(MenuItem menuItem) {
@@ -2536,185 +1989,6 @@ public class EditorActivity extends AppCompatActivity {
             mText.requestFocus();
             queryTextListener = null;
             return true;
-        }
-    }
-
-    private void snapshotCurrentTab() {
-        int index = tabManager.getActiveIndex();
-        int scrollY = (scrollView != null) ? scrollView.getScrollY() : mText.getScrollY();
-        tabManager.snapshotTab(
-            index,
-            mText.getText().toString(),
-            mText.getSelectionStart(),
-            mText.getSelectionEnd(),
-            mText.getScrollX(),
-            scrollY,
-            changed
-        );
-        // Also sync save-validation fields into EditorState
-        EditorState state = tabManager.getActiveTab();
-        state.originalContentSha256 = originalContentSha256;
-        state.originalSize = originalSize;
-        state.originalLastModified = originalLastModified;
-        state.recoveryKey = recoveryKey;
-        state.editorGeneration = editorGeneration;
-        state.urlFilename = urlFilename;
-    }
-
-    private void loadTab(int index) {
-        tabManager.setActiveIndex(index);
-        EditorState state = tabManager.getActiveTab();
-
-        // Restore all fields from state
-        urlFilename = state.urlFilename;
-        changed = state.changed;
-        originalContentSha256 = state.originalContentSha256;
-        originalSize = state.originalSize;
-        originalLastModified = state.originalLastModified;
-        recoveryKey = state.recoveryKey;
-        editorGeneration = state.editorGeneration;
-        selectionStart = state.cursorStart;
-        selectionEnd = state.cursorEnd;
-
-        // Apply read-only flag
-        mText.setFocusable(!state.isReadOnly);
-        mText.setFocusableInTouchMode(!state.isReadOnly);
-        mText.setLongClickable(!state.isReadOnly);
-
-        setEditorText(state.content, state.changed);
-
-        // Restore scroll
-        int finalScrollX = state.scrollX;
-        int finalScrollY = state.scrollY;
-        mText.post(() -> {
-            mText.scrollTo(finalScrollX, 0);
-            if (scrollView != null) scrollView.scrollTo(0, finalScrollY);
-            else mText.scrollTo(finalScrollX, finalScrollY);
-        });
-
-        updateTitle();
-        invalidateOptionsMenu();
-    }
-
-    public void switchToTab(int index) {
-        if (index == tabManager.getActiveIndex()) return;
-        snapshotCurrentTab();
-        loadTab(index);
-    }
-
-    private void onTabsChanged() {
-        // Rebuild tab list in menu — Bước 4 sẽ dùng
-        invalidateOptionsMenu();
-    }
-
-
-    /**
-     * Opens a file as a new read-only tab.
-     * Called from "Open in New Tab" menu item.
-     */
-    private void openFileInNewTab() {
-        if (tabManager.isReadOnlyFull()) {
-            // showToast("Maximum tabs reached. Close a tab first.");
-            showCloseTabDialog();
-            return;
-        }
-        openAsReadOnly = true;
-        selectFileUsingAndroidSystemPicker();
-    }
-    // private void openFileInNewTab() {
-    //     if (tabManager.isReadOnlyFull()) {
-    //         // Already at 4 read-only tabs — Bước 6 xử lý
-    //         showToast("Maximum tabs reached. Close a tab first.");
-    //         return;
-    //     }
-    //     // Reuse system picker, result handled in onActivityResult
-    //     selectFileUsingAndroidSystemPicker();
-    // }
-
-    /**
-     * Shows a dialog asking user which read-only tab to close
-     * when the max of 4 read-only tabs is reached.
-     */
-    private void showCloseTabDialog() {
-        List<EditorState> readOnlyTabs = tabManager.getReadOnlyTabs();
-        if (readOnlyTabs.isEmpty()) {
-            showToast("No read-only tabs to close.");
-            return;
-        }
-
-        // Build display names for each read-only tab
-        String[] tabNames = new String[readOnlyTabs.size()];
-        for (int i = 0; i < readOnlyTabs.size(); i++) {
-            EditorState state = readOnlyTabs.get(i);
-            String name = (state.displayName != null && !state.displayName.isEmpty())
-                    ? state.displayName : "Tab " + (i + 1);
-            tabNames[i] = name;
-        }
-
-        new AlertDialog.Builder(this)
-                .setTitle("Close a tab to open new one")
-                .setItems(tabNames, (dialog, which) -> {
-                    // which = index in readOnlyTabs list (0-based)
-                    // actual tab index in tabManager = which + 1 (tab 0 is edit tab)
-                    int tabIndexToClose = which + 1;
-                    tabManager.removeReadOnlyTab(tabIndexToClose);
-                    // Now open the new file in a read-only tab
-                    openAsReadOnly = true;
-                    selectFileUsingAndroidSystemPicker();
-                })
-                .setNegativeButton(R.string.Cancel, (dialog, which) -> {
-                    // User declined — do nothing
-                })
-                .show();
-    }
-
-    /**
-     * Handles the "Edit this file" action from a read-only tab.
-     * Checks edit tab for unsaved changes, then loads the file into edit tab.
-     */
-    private void requestEditCurrentReadOnlyFile() {
-        EditorState activeTab = tabManager.getActiveTab();
-        if (activeTab == null || !activeTab.isReadOnly) return;
-
-        // Remember which read-only tab to close after confirm
-        final int readOnlyTabIndex = tabManager.getActiveIndex();
-        final String fileToEdit = activeTab.urlFilename;
-        final String displayName = activeTab.displayName;
-
-        EditorState editTab = tabManager.getEditTab();
-
-        if (editTab.changed) {
-            // Edit tab has unsaved changes — ask user
-            new AlertDialog.Builder(this)
-                    .setIcon(android.R.drawable.ic_dialog_alert)
-                    .setTitle(R.string.File_not_saved)
-                    .setMessage(R.string.Save_current_file)
-                    .setPositiveButton(R.string.Yes, (dialog, which) -> {
-                        // Save edit tab first, then open file in edit tab
-                        // next_action = DO_OPEN;
-                        next_action = DO_OPEN_IN_EDIT;
-                        next_action_filename = fileToEdit;
-                        pendingCloseReadOnlyTabIndex = readOnlyTabIndex;
-                        // Switch to edit tab first so save operates on it
-                        switchToTab(0);
-                        saveFile();
-                    })
-                    .setNegativeButton(R.string.No, (dialog, which) -> {
-                        // Discard edit tab changes, open file in edit tab
-                        switchToTab(0);
-                        discardCurrentRecovery();
-                        tabManager.removeReadOnlyTab(readOnlyTabIndex);
-                        openFileByName(fileToEdit);
-                    })
-                    .setNeutralButton(R.string.Cancel, (dialog, which) -> {
-                        // Do nothing — read-only tab stays
-                    })
-                    .show();
-        } else {
-            // No unsaved changes — open directly
-            switchToTab(0);
-            tabManager.removeReadOnlyTab(readOnlyTabIndex);
-            openFileByName(fileToEdit);
         }
     }
 
