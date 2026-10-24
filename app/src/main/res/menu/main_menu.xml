@@ -46,7 +46,34 @@
         android:id="@+id/tab_list"
         android:title="Tab List"
         android:icon="@drawable/ic_folder_open"
-        app:iconTint="@color/colorIcon" />
+        app:iconTint="@color/colorIcon" >
+        <menu>
+            <item
+                android:id="@+id/menu_tab_0"
+                android:title="@string/menu_tab_edit"
+                android:showAsAction="never" />
+            <item
+                android:id="@+id/menu_tab_1"
+                android:title=""
+                android:visible="false"
+                android:showAsAction="never" />
+            <item
+                android:id="@+id/menu_tab_2"
+                android:title=""
+                android:visible="false"
+                android:showAsAction="never" />
+            <item
+                android:id="@+id/menu_tab_3"
+                android:title=""
+                android:visible="false"
+                android:showAsAction="never" />
+            <item
+                android:id="@+id/menu_tab_4"
+                android:title=""
+                android:visible="false"
+                android:showAsAction="never" />
+        </menu>
+    </item>
     <item
         android:id="@+id/menu_document_edit_in_main"
         android:title="Edit this file"

@@ -95,7 +95,11 @@ import android.text.style.ClickableSpan;
 import android.view.View;
 import android.widget.TextView;
 
+import com.maxistar.textpad.TabManager;
+import com.maxistar.textpad.EditorState;
+
 public class EditorActivity extends AppCompatActivity {
+    private TabManager tabManager;
 
     private static final String STATE_FILENAME = "filename";
     private static final String STATE_CHANGED = "changed";
@@ -206,6 +210,8 @@ public class EditorActivity extends AppCompatActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        tabManager = TabManager.getInstance();
+        tabManager.addListener(this::onTabsChanged);
 
         settingsService = ServiceLocator.getInstance().getSettingsService(this.getApplicationContext());
         recentFilesService = ServiceLocator.getInstance().getRecentFilesService();
@@ -281,6 +287,10 @@ public class EditorActivity extends AppCompatActivity {
         return settingsService.isUseSimpleScrolling();
     }
 
+    private int pendingCloseReadOnlyTabIndex = -1;
+    private boolean openAsReadOnly = false;
+    private static final int DO_OPEN_IN_EDIT = 6;
+    
     @RequiresApi(Build.VERSION_CODES.VANILLA_ICE_CREAM)
     private void applyEdgeToEdgeInsets() {
         View editorRoot = findViewById(R.id.editor_root);
@@ -465,6 +475,9 @@ public class EditorActivity extends AppCompatActivity {
         if (settingsService.useWakeLock()) {
             ServiceLocator.getInstance().getWakeLockService().releaseLock();
         }
+        
+        // Add snapshot before pause
+        snapshotCurrentTab();
         super.onPause();
     }
 
@@ -692,10 +705,18 @@ public class EditorActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        tabManager.removeListener(this::onTabsChanged); // prevent leak
         recoveryWriter.shutdown();
         editTextUndoRedo.disconnect();
         super.onDestroy();
     }
+
+    // @Override
+    // protected void onDestroy() {
+    //     recoveryWriter.shutdown();
+    //     editTextUndoRedo.disconnect();
+    //     super.onDestroy();
+    // }
 
     @Override
     public void onBackPressed() {
@@ -754,8 +775,16 @@ public class EditorActivity extends AppCompatActivity {
     }
 
     void updateTitle() {
-        this.setTitle(getEditingTitle());
+        EditorState active = tabManager != null ? tabManager.getActiveTab() : null;
+        boolean isReadOnly = active != null && active.isReadOnly;
+        String title = getEditingTitle();
+        if (isReadOnly) title = "[R] " + title; // prefix for read-only tab
+        this.setTitle(title);
     }
+
+    // void updateTitle() {
+    //     this.setTitle(getEditingTitle());
+    // }
 
     private String getEditingTitle() {
         String title;
@@ -1015,7 +1044,16 @@ public class EditorActivity extends AppCompatActivity {
             MenuItem printMenu = menu.findItem(R.id.menu_document_print);
             printMenu.setVisible(false);
         }
+        
+        // Show "Edit this file" button only on read-only tabs
+        MenuItem editInMainItem = menu.findItem(R.id.menu_document_edit_in_main);
+        if (editInMainItem != null) {
+            EditorState active = tabManager.getActiveTab();
+            editInMainItem.setVisible(active != null && active.isReadOnly);
+        }
 
+        updateTabsMenu(menu);
+        
         return true;
     }
 
@@ -1102,6 +1140,40 @@ public class EditorActivity extends AppCompatActivity {
         }
     }
 
+    private void updateTabsMenu(Menu menu) {
+        List<EditorState> tabs = tabManager.getTabs();
+        int activeIndex = tabManager.getActiveIndex();
+
+        int[] tabMenuIds = {
+            R.id.menu_tab_0,
+            R.id.menu_tab_1,
+            R.id.menu_tab_2,
+            R.id.menu_tab_3,
+            R.id.menu_tab_4
+        };
+
+        for (int i = 0; i < tabMenuIds.length; i++) {
+            MenuItem item = menu.findItem(tabMenuIds[i]);
+            if (item == null) continue;
+
+            if (i < tabs.size()) {
+                EditorState state = tabs.get(i);
+                item.setVisible(true);
+
+                // Build display title
+                String name = (state.displayName != null && !state.displayName.isEmpty())
+                        ? state.displayName
+                        : (i == 0 ? "Edit Tab" : "Tab " + i);
+                String prefix = (i == activeIndex) ? "▶ " : "   ";
+                String suffix = state.changed ? " *" : "";
+                String readOnly = state.isReadOnly ? " [R]" : "";
+                item.setTitle(prefix + name + readOnly + suffix);
+            } else {
+                item.setVisible(false);
+            }
+        }
+    }
+
     @SuppressLint("RestrictedApi")
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
@@ -1157,6 +1229,20 @@ public class EditorActivity extends AppCompatActivity {
             printText();
         } else if (itemId == R.id.menu_document_settings) {
             showSettings();
+        } else if (itemId == R.id.menu_tab_0) {
+            switchToTab(0);
+        } else if (itemId == R.id.menu_tab_1) {
+            switchToTab(1);
+        } else if (itemId == R.id.menu_tab_2) {
+            switchToTab(2);
+        } else if (itemId == R.id.menu_tab_3) {
+            switchToTab(3);
+        } else if (itemId == R.id.menu_tab_4) {
+            switchToTab(4);
+        } else if (itemId == R.id.menu_document_edit_in_main) {
+            requestEditCurrentReadOnlyFile();
+        } else if (itemId == R.id.menu_document_open_new_tab) {
+            openFileInNewTab();
         } else if (itemId == R.id.menu_exit) {
             exitApplication();
         }
@@ -1318,8 +1404,24 @@ public class EditorActivity extends AppCompatActivity {
         setEditorText(TPStrings.EMPTY, false);
         setFilename(TPStrings.EMPTY);
         initEditor();
+        // Update edit tab display name with generated filename
+        tabManager.getEditTab().displayName = EditorState.generateNewFileName();
         updateTitle();
     }
+
+    // public void clearFile() {
+    //     discardCurrentRecovery();
+    //     editorGeneration = 0;
+    //     originalSize = null;
+    //     originalLastModified = null;
+    //     originalContentSha256 = null;
+    //     selectionStart = 0;
+    //     selectionEnd = 0;
+    //     setEditorText(TPStrings.EMPTY, false);
+    //     setFilename(TPStrings.EMPTY);
+    //     initEditor();
+    //     updateTitle();
+    // }
 
     private void discardCurrentRecovery() {
         recoveryWriter.cancelAndWait(recoveryKey, editorGeneration, 2000);
@@ -1622,6 +1724,13 @@ public class EditorActivity extends AppCompatActivity {
             showSettingsActivity();
         } else if (next_action == DO_OPEN_RECENT) {
             next_action = DO_NOTHING;
+            openFileByName(next_action_filename);
+        } else if (next_action == DO_OPEN_IN_EDIT) {
+            next_action = DO_NOTHING;
+            if (pendingCloseReadOnlyTabIndex > 0) {
+                tabManager.removeReadOnlyTab(pendingCloseReadOnlyTabIndex);
+                pendingCloseReadOnlyTabIndex = -1;
+            }
             openFileByName(next_action_filename);
         } else if (next_action == DO_EXIT) {
             next_action = DO_NOTHING;
@@ -2029,6 +2138,59 @@ public class EditorActivity extends AppCompatActivity {
     }
 
     /**
+     * Opens a file as a read-only tab without affecting the edit tab.
+     */
+    @RequiresApi(api = Build.VERSION_CODES.KITKAT)
+    private void openNamedFileAsReadOnly(final Uri uri) {
+        try {
+            ContentResolver contentResolver = getContentResolver();
+            InputStream inputStream = contentResolver.openInputStream(uri);
+            if (inputStream == null) throw new IOException();
+
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream(
+                    Math.max(8192, inputStream.available()));
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = inputStream.read(buffer)) != -1) {
+                bytes.write(buffer, 0, count);
+            }
+            byte[] b = bytes.toByteArray();
+            inputStream.close();
+
+            String content = new String(b, settingsService.getFileEncoding());
+            content = toUnixEndings(content);
+
+            String filename = uri.toString();
+            String displayName = FileNameHelper.getFilenameByUri(this, uri);
+
+            // Check if already open
+            if (tabManager.isAlreadyOpen(filename)) {
+                showToast(displayName + " is already open");
+                int existingIndex = tabManager.findByFilename(filename);
+                switchToTab(existingIndex);
+                return;
+            }
+
+            EditorState readOnlyState = EditorState.newReadOnlyTab(filename, displayName, content);
+            boolean added = tabManager.addReadOnlyTab(readOnlyState);
+            if (!added) {
+                showToast("Maximum tabs reached. Close a tab first.");
+                return;
+            }
+
+            // Switch to the new read-only tab
+            int newIndex = tabManager.findByFilename(filename);
+            loadTab(newIndex);
+            showToast(getString(R.string.File_opened_, displayName));
+
+        } catch (FileNotFoundException e) {
+            showToast(R.string.File_not_found);
+        } catch (Exception e) {
+            showToast(R.string.Can_not_read_file);
+        }
+    }
+
+    /**
      *
      */
     @SuppressLint("WrongConstant")
@@ -2056,18 +2218,19 @@ public class EditorActivity extends AppCompatActivity {
             }
         } else if (requestCode == REQUEST_SETTINGS) {
             applyPreferences();
-        } else if (requestCode == ACTION_OPEN_FILE
-                && resultCode == Activity.RESULT_OK) {
-            // The result data contains a URI for the document or directory that
-            // the user selected.
+        } else if (requestCode == ACTION_OPEN_FILE && resultCode == Activity.RESULT_OK) {
             Uri uri;
             if (data != null) {
                 uri = data.getData();
                 if (uri != null) {
-                    // Check for the freshest data.
                     persistUriPermissions(data);
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-                        openNamedFile(uri);
+                        if (openAsReadOnly) {
+                            openAsReadOnly = false;
+                            openNamedFileAsReadOnly(uri);
+                        } else {
+                            openNamedFile(uri);
+                        }
                     }
                 }
             }
@@ -2373,6 +2536,185 @@ public class EditorActivity extends AppCompatActivity {
             mText.requestFocus();
             queryTextListener = null;
             return true;
+        }
+    }
+
+    private void snapshotCurrentTab() {
+        int index = tabManager.getActiveIndex();
+        int scrollY = (scrollView != null) ? scrollView.getScrollY() : mText.getScrollY();
+        tabManager.snapshotTab(
+            index,
+            mText.getText().toString(),
+            mText.getSelectionStart(),
+            mText.getSelectionEnd(),
+            mText.getScrollX(),
+            scrollY,
+            changed
+        );
+        // Also sync save-validation fields into EditorState
+        EditorState state = tabManager.getActiveTab();
+        state.originalContentSha256 = originalContentSha256;
+        state.originalSize = originalSize;
+        state.originalLastModified = originalLastModified;
+        state.recoveryKey = recoveryKey;
+        state.editorGeneration = editorGeneration;
+        state.urlFilename = urlFilename;
+    }
+
+    private void loadTab(int index) {
+        tabManager.setActiveIndex(index);
+        EditorState state = tabManager.getActiveTab();
+
+        // Restore all fields from state
+        urlFilename = state.urlFilename;
+        changed = state.changed;
+        originalContentSha256 = state.originalContentSha256;
+        originalSize = state.originalSize;
+        originalLastModified = state.originalLastModified;
+        recoveryKey = state.recoveryKey;
+        editorGeneration = state.editorGeneration;
+        selectionStart = state.cursorStart;
+        selectionEnd = state.cursorEnd;
+
+        // Apply read-only flag
+        mText.setFocusable(!state.isReadOnly);
+        mText.setFocusableInTouchMode(!state.isReadOnly);
+        mText.setLongClickable(!state.isReadOnly);
+
+        setEditorText(state.content, state.changed);
+
+        // Restore scroll
+        int finalScrollX = state.scrollX;
+        int finalScrollY = state.scrollY;
+        mText.post(() -> {
+            mText.scrollTo(finalScrollX, 0);
+            if (scrollView != null) scrollView.scrollTo(0, finalScrollY);
+            else mText.scrollTo(finalScrollX, finalScrollY);
+        });
+
+        updateTitle();
+        invalidateOptionsMenu();
+    }
+
+    public void switchToTab(int index) {
+        if (index == tabManager.getActiveIndex()) return;
+        snapshotCurrentTab();
+        loadTab(index);
+    }
+
+    private void onTabsChanged() {
+        // Rebuild tab list in menu — Bước 4 sẽ dùng
+        invalidateOptionsMenu();
+    }
+
+
+    /**
+     * Opens a file as a new read-only tab.
+     * Called from "Open in New Tab" menu item.
+     */
+    private void openFileInNewTab() {
+        if (tabManager.isReadOnlyFull()) {
+            // showToast("Maximum tabs reached. Close a tab first.");
+            showCloseTabDialog();
+            return;
+        }
+        openAsReadOnly = true;
+        selectFileUsingAndroidSystemPicker();
+    }
+    // private void openFileInNewTab() {
+    //     if (tabManager.isReadOnlyFull()) {
+    //         // Already at 4 read-only tabs — Bước 6 xử lý
+    //         showToast("Maximum tabs reached. Close a tab first.");
+    //         return;
+    //     }
+    //     // Reuse system picker, result handled in onActivityResult
+    //     selectFileUsingAndroidSystemPicker();
+    // }
+
+    /**
+     * Shows a dialog asking user which read-only tab to close
+     * when the max of 4 read-only tabs is reached.
+     */
+    private void showCloseTabDialog() {
+        List<EditorState> readOnlyTabs = tabManager.getReadOnlyTabs();
+        if (readOnlyTabs.isEmpty()) {
+            showToast("No read-only tabs to close.");
+            return;
+        }
+
+        // Build display names for each read-only tab
+        String[] tabNames = new String[readOnlyTabs.size()];
+        for (int i = 0; i < readOnlyTabs.size(); i++) {
+            EditorState state = readOnlyTabs.get(i);
+            String name = (state.displayName != null && !state.displayName.isEmpty())
+                    ? state.displayName : "Tab " + (i + 1);
+            tabNames[i] = name;
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("Close a tab to open new one")
+                .setItems(tabNames, (dialog, which) -> {
+                    // which = index in readOnlyTabs list (0-based)
+                    // actual tab index in tabManager = which + 1 (tab 0 is edit tab)
+                    int tabIndexToClose = which + 1;
+                    tabManager.removeReadOnlyTab(tabIndexToClose);
+                    // Now open the new file in a read-only tab
+                    openAsReadOnly = true;
+                    selectFileUsingAndroidSystemPicker();
+                })
+                .setNegativeButton(R.string.Cancel, (dialog, which) -> {
+                    // User declined — do nothing
+                })
+                .show();
+    }
+
+    /**
+     * Handles the "Edit this file" action from a read-only tab.
+     * Checks edit tab for unsaved changes, then loads the file into edit tab.
+     */
+    private void requestEditCurrentReadOnlyFile() {
+        EditorState activeTab = tabManager.getActiveTab();
+        if (activeTab == null || !activeTab.isReadOnly) return;
+
+        // Remember which read-only tab to close after confirm
+        final int readOnlyTabIndex = tabManager.getActiveIndex();
+        final String fileToEdit = activeTab.urlFilename;
+        final String displayName = activeTab.displayName;
+
+        EditorState editTab = tabManager.getEditTab();
+
+        if (editTab.changed) {
+            // Edit tab has unsaved changes — ask user
+            new AlertDialog.Builder(this)
+                    .setIcon(android.R.drawable.ic_dialog_alert)
+                    .setTitle(R.string.File_not_saved)
+                    .setMessage(R.string.Save_current_file)
+                    .setPositiveButton(R.string.Yes, (dialog, which) -> {
+                        // Save edit tab first, then open file in edit tab
+                        // next_action = DO_OPEN;
+                        next_action = DO_OPEN_IN_EDIT;
+                        next_action_filename = fileToEdit;
+                        pendingCloseReadOnlyTabIndex = readOnlyTabIndex;
+                        // Switch to edit tab first so save operates on it
+                        switchToTab(0);
+                        saveFile();
+                    })
+                    .setNegativeButton(R.string.No, (dialog, which) -> {
+                        // Discard edit tab changes, open file in edit tab
+                        switchToTab(0);
+                        discardCurrentRecovery();
+                        tabManager.removeReadOnlyTab(readOnlyTabIndex);
+                        openFileByName(fileToEdit);
+                    })
+                    .setNeutralButton(R.string.Cancel, (dialog, which) -> {
+                        // Do nothing — read-only tab stays
+                    })
+                    .show();
+        } else {
+            // No unsaved changes — open directly
+            switchToTab(0);
+            tabManager.removeReadOnlyTab(readOnlyTabIndex);
+            openFileByName(fileToEdit);
         }
     }
 

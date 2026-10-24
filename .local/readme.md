@@ -27,20 +27,18 @@ Luồng hoạt động:
 Tab chính (edit)     → luôn chỉ có 1
 Tab phụ (read-only)  → tối đa 4 tab
                      → tổng cộng 5 tab
-
 Nút “Edit” trên tab read-only:
 
-1. Đóng tab read-only hiện tại
-2. Kiểm tra tab chính có unsaved changes không
-   → Nếu có: hỏi "Save trước không?"
-     Yes    → save → mở file mới trong tab chính
-     No     → discard → mở file mới trong tab chính
-     Cancel → hủy, không làm gì
-   → Nếu không: mở file mới trong tab chính luôn
+1. Kiểm tra tab chính có unsaved changes không
+   → Nếu có: hỏi dialog
+     Yes    → save → đóng tab read-only → mở file vào tab chính
+     No     → discard → đóng tab read-only → mở file vào tab chính
+     Cancel → không làm gì cả (tab read-only vẫn còn nguyên)
+   → Nếu không: đóng tab read-only → mở file vào tab chính
 
 Bắt đầu implement từ đâu?
 
 Bước 1: Thêm flag READ_ONLY vào EditorActivity, disable edit
-Bước 2: Thêm UI tab bar để chuyển giữa các Activity
+Bước 2: danh sach tab trong menu "tab list"
 Bước 3: Thêm nút “Edit” trên tab read-only, xử lý luồng trên
 Bước 4: Giới hạn tối đa 5 tab
