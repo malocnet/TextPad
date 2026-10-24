@@ -52,6 +52,8 @@
     <string name="Search">Search</string>
     <string name="Choose_a_color">Choose a color</string>
     <string name="Open_File">Open File</string>
+    <string name="menu_tabs">Tabs</string>
+    <string name="menu_tab_edit">✏ Edit Tab</string>
     <string name="Save_File">Save File</string>
     <string name="Click_to_change_encoding">Click to change encoding</string>
     <string name="Encoding">Encoding</string>
