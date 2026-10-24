@@ -886,7 +886,7 @@ public class EditorActivity extends AppCompatActivity {
             @Override
             public void beforeTextChanged(CharSequence s, int start, int count, int after) {
             }
-
+            
             @Override
             public void onTextChanged(CharSequence s, int start, int before, int count) {
                 invalidateHorizontalScrollBounds();
@@ -896,6 +896,7 @@ public class EditorActivity extends AppCompatActivity {
                     changed = true;
                     updateTitle();
                 }
+                updateUndoRedoMenuItems();
             }
         };
     }
@@ -1199,6 +1200,10 @@ public class EditorActivity extends AppCompatActivity {
             if (!query.equals(lastSearchQuery)) {
                 lastSearchQuery = query;
                 runFindAll(query);
+            } else if (findResults.isEmpty()) {
+                runFindAll(query);
+            } else if (findCurrentIndex >= findResults.size() - 1) {
+                runFindAll(query);
             } else {
                 findMove(1);
             }
@@ -1219,6 +1224,14 @@ public class EditorActivity extends AppCompatActivity {
 
     private List<Integer> findResults = new ArrayList<>();
     private int findCurrentIndex = -1;
+
+    private void updateUndoRedoMenuItems() {
+        if (optionsMenu == null) return;
+        MenuItem undo = optionsMenu.findItem(R.id.menu_edit_undo);
+        MenuItem redo = optionsMenu.findItem(R.id.menu_edit_redo);
+        if (undo != null) undo.setEnabled(editTextUndoRedo.getCanUndo());
+        if (redo != null) redo.setEnabled(editTextUndoRedo.getCanRedo());
+    }
 
     private void runFindAll(String query) {
         findResults.clear();

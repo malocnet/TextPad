@@ -17,7 +17,7 @@ read -s -p "Enter token: " TOKEN && git clone https://malocnet:$TOKEN@github.com
 Sau khi màn hình báo BUILD SUCCESSFUL, file APK của bạn sẽ nằm tại đường dẫn:
 [Thư-mục-dự-án]/app/build/outputs/apk/debug/app-debug.apk
 ```bash
-cp /mnt/data/hoainh/Documents/TextPad/app/build/outputs/apk/debug/app-debug.apk /mnt/data/hoainh/Documents/TextPad/TextPad-v0.0.3.apk
+cp /mnt/data/hoainh/Documents/TextPad/app/build/outputs/apk/debug/app-debug.apk /mnt/data/hoainh/Documents/TextPad/TextPad-debug-v0.0.3.apk
 ```
 
 
