@@ -13,3 +13,17 @@ scripts/dist
 scripts/__pycache__/
 *.pyc
 .DS_Store
+.local/
+
+# Signing
+local.properties
+*.jks
+*.keystore
+*.p12
+
+# Build outputs (không commit APK/AAB vào repo, đã publish qua GitHub Release)
+app/build/outputs/
+
+# Release tool cache
+scripts/__pycache__/
+scripts/*.pyc
