@@ -22,14 +22,14 @@ import java.text.DateFormat;
 import android.provider.DocumentsContract;
 import android.content.UriPermission;
 import android.widget.Button;
-import android.Manifest;
+// import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageManager;
+// import android.content.pm.PackageManager;
 import android.graphics.Typeface;
 import android.graphics.Insets;
 import android.graphics.Rect;
@@ -118,12 +118,12 @@ public class EditorActivity extends AppCompatActivity {
     private static final int DO_EXIT = 3;
     private static final int DO_OPEN_RECENT = 4;
     private static final int DO_SHOW_SETTINGS = 5;
+    private static final int RECENT_MENU_BASE_ID = 0x00e00000;
+    private static final int RECENT_MENU_MAX = 15;  
+    private static final int DRAFT_MENU_BASE_ID = 0x00f00000;
+    private static final int DRAFT_MENU_MAX = 50;
 
     private static final String LOG_TAG = "TextEditor";
-
-    // Folder names trong simpletexteditor/
-    private static final String DIR_TEMP = "temp";
-    private static final String DIR_NOTSAVE = "notsave";
 
     String[] mimeTypes = {
             "*/*",
@@ -145,7 +145,6 @@ public class EditorActivity extends AppCompatActivity {
     boolean changed = false;
     boolean exitDialogShown = false;
 
-    // isTempFile = true khi file đang ở simpletexteditor/temp/ và chưa được user đặt tên thật
     private boolean isTempFile = false;
 
     private int next_action = DO_NOTHING;
@@ -198,37 +197,38 @@ public class EditorActivity extends AppCompatActivity {
     private int horizontalScrollBoundsCalculationCount = 0;
 
     // ─────────────────────────────────────────────────────────────
-    // Temp / NoSave file helpers
+    // Temp / AutoSave file helpers
     // ─────────────────────────────────────────────────────────────
 
-    /**
-     * Lấy root folder: getExternalFilesDir()/simpletexteditor/
-     * Dùng external để file picker / Recent Files mở lại được.
-     */
     private File getSimpleTextEditorDir() {
-        File base = getExternalFilesDir(null);
-        if (base == null) base = getFilesDir(); // fallback nếu external không available
-        return new File(base, "simpletexteditor");
+        // Dùng thư mục private của app, không cần xin quyền
+        File dir = new File(getFilesDir(), "TextPad");
+        if (!dir.exists()) dir.mkdirs();
+        return dir;
     }
 
-    /**
-     * Tạo file tạm mới trong simpletexteditor/temp/
-     * Tên: newfile-yyyyMMddHHmm-uuid.txt
-     */
+    // private File getSimpleTextEditorDir() {
+    //     File documents = new File(
+    //         android.os.Environment.getExternalStoragePublicDirectory(
+    //             android.os.Environment.DIRECTORY_DOCUMENTS
+    //         ),
+    //         "TextPad"
+    //     );
+    //     if (documents.mkdirs() || documents.exists()) return documents;
+    //     File base = getExternalFilesDir(null);
+    //     if (base == null) base = getFilesDir();
+    //     return new File(base, "TextPad");
+    // }
+
     private File createNewTempFile() {
         String timestamp = new SimpleDateFormat("yyyyMMddHHmm", Locale.US).format(new Date());
         String uuid = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
         String name = "newfile-" + timestamp + "-" + uuid + ".txt";
-        File dir = new File(getSimpleTextEditorDir(), DIR_TEMP);
+        File dir = getSimpleTextEditorDir();
         dir.mkdirs();
         return new File(dir, name);
     }
 
-    /**
-     * Tạo tên file cho notsave/ hoặc temp/ từ file đang mở.
-     * Format: basename-yyyyMMddHHmm-uuid.ext
-     * Ví dụ: notes-202410241530-a1b2c3d4.txt
-     */
     private String buildTimestampedName(String originalName) {
         String timestamp = new SimpleDateFormat("yyyyMMddHHmm", Locale.US).format(new Date());
         String uuid = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
@@ -242,24 +242,18 @@ public class EditorActivity extends AppCompatActivity {
         }
     }
 
-    /**
-     * Kiểm tra path có nằm trong simpletexteditor/temp/ không.
-     */
     private boolean isInTempDir(String path) {
         if (path == null || path.isEmpty()) return false;
         try {
-            File tempDir = new File(getSimpleTextEditorDir(), DIR_TEMP).getCanonicalFile();
+            File dir = getSimpleTextEditorDir().getCanonicalFile();
             File f = new File(path).getCanonicalFile();
             return f.getParentFile() != null &&
-                   f.getParentFile().getCanonicalPath().equals(tempDir.getCanonicalPath());
+                f.getParentFile().getCanonicalPath().equals(dir.getCanonicalPath());
         } catch (IOException e) {
             return false;
         }
     }
 
-    /**
-     * Xóa file tạm hiện tại nếu isTempFile = true.
-     */
     private void deleteTempFile() {
         if (!isTempFile || urlFilename == null || urlFilename.isEmpty()) return;
         try {
@@ -269,35 +263,61 @@ public class EditorActivity extends AppCompatActivity {
         isTempFile = false;
     }
 
-    /**
-     * Auto-save nội dung hiện tại vào simpletexteditor/notsave/
-     * Chỉ gọi khi file thật (isTempFile=false) có thay đổi và user mở file khác.
-     * Không hỏi user, không toast lỗi.
-     */
+    private boolean isFileInTextPadDir(Uri uri) {
+        try {
+            String path = uri.getPath();
+            if (path == null) return false;
+            File f = new File(path).getCanonicalFile();
+            File dir = getSimpleTextEditorDir().getCanonicalFile();
+            return f.getParentFile() != null &&
+                f.getParentFile().getCanonicalPath().equals(dir.getCanonicalPath());
+        } catch (IOException e) { return false; }
+    }
+
+    private boolean isNewfileName(Uri uri) {
+        String path = uri.getPath();
+        if (path == null) return false;
+        return new File(path).getName().startsWith("newfile-");
+    }
+
+    private void updateRecentFiles(Menu menu) {
+        MenuItem recentMenuItem = menu.findItem(R.id.menu_document_open_last);
+        if (!settingsService.isShowLastEditedFiles()) {
+            recentMenuItem.setVisible(false);
+            return;
+        }
+        ArrayList<String> recentFiles = recentFilesService.getLastFiles(0, getApplicationContext());
+        recentMenuItem.setVisible(!recentFiles.isEmpty());
+        android.view.SubMenu sub = recentMenuItem.getSubMenu();
+        if (sub == null) return;
+        sub.clear();
+        for (int i = 0; i < recentFiles.size(); i++) {
+            String label = FileNameHelper.getFilenameByUri(getApplicationContext(), recentFiles.get(i));
+            sub.add(Menu.NONE, RECENT_MENU_BASE_ID + i, i, label);
+        }
+    }
+
     private void autoSaveToNotsave() {
         if (!changed) return;
         String content = mText.getText().toString();
         if (content.trim().isEmpty()) return;
         try {
             String displayName = currentDisplayName();
+            if (displayName == null || displayName.isEmpty() || displayName.startsWith("content://")) {
+                displayName = "unsaved.txt";
+            }
             String fileName = buildTimestampedName(displayName);
-            File dir = new File(getSimpleTextEditorDir(), DIR_NOTSAVE);
+            File dir = getSimpleTextEditorDir();
             dir.mkdirs();
             File outFile = new File(dir, fileName);
             String encoded = applyEndings(content);
             try (FileOutputStream fos = new FileOutputStream(outFile)) {
                 fos.write(encoded.getBytes(settingsService.getFileEncoding()));
             }
-            // Thêm vào recent files để user mở lại được
             recentFilesService.addRecentFile(outFile.toURI().toString(), getApplicationContext());
         } catch (Exception ignored) {}
     }
 
-    /**
-     * Auto-save file tạm vào simpletexteditor/temp/ trước khi tạo file tạm mới.
-     * File tạm giữ nguyên tên (đã ở trong temp/).
-     * Nếu nội dung rỗng thì xóa luôn.
-     */
     private void autoSaveTempBeforeNew() {
         if (!isTempFile) return;
         String content = mText.getText().toString();
@@ -305,7 +325,6 @@ public class EditorActivity extends AppCompatActivity {
             deleteTempFile();
             return;
         }
-        // File tạm đã ở trong temp/, chỉ cần ghi nội dung hiện tại vào đó
         try {
             String path = Uri.parse(urlFilename).getPath();
             if (path == null) return;
@@ -317,6 +336,36 @@ public class EditorActivity extends AppCompatActivity {
         } catch (Exception ignored) {}
     }
 
+    // public static void verifyPermissions(Activity activity) {
+    //     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+    //         if (!android.os.Environment.isExternalStorageManager()) {
+    //             new AlertDialog.Builder(activity)
+    //                 .setTitle(R.string.permission_storage_title)
+    //                 .setMessage(R.string.permission_storage_message)
+    //                 .setPositiveButton(R.string.permission_storage_button, (dialog, which) -> {
+    //                     Intent intent = new Intent(
+    //                         android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+    //                         Uri.parse("package:" + activity.getPackageName())
+    //                     );
+    //                     activity.startActivity(intent);
+    //                 })
+    //                 .setNegativeButton(R.string.Cancel, null)
+    //                 .show();
+    //         }
+    //         return;
+    //     }
+
+    //     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
+    //     int permission = activity.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+    //     if (permission != PackageManager.PERMISSION_GRANTED) {
+    //         activity.requestPermissions(new String[]{
+    //             Manifest.permission.READ_EXTERNAL_STORAGE,
+    //             Manifest.permission.WRITE_EXTERNAL_STORAGE,
+    //             Manifest.permission.WAKE_LOCK,
+    //         }, 1);
+    //     }
+    // }
+
     // ─────────────────────────────────────────────────────────────
     // Lifecycle
     // ─────────────────────────────────────────────────────────────
@@ -324,6 +373,13 @@ public class EditorActivity extends AppCompatActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
+            new AlertDialog.Builder(this)
+                .setTitle("Bug")
+                .setMessage(throwable.toString())
+                .setPositiveButton("OK", null)
+                .show();
+        });
 
         settingsService = ServiceLocator.getInstance().getSettingsService(this.getApplicationContext());
         recentFilesService = ServiceLocator.getInstance().getRecentFilesService();
@@ -369,7 +425,7 @@ public class EditorActivity extends AppCompatActivity {
             restoreState(savedInstanceState);
             restoreEditorContent();
         } else {
-            verifyPermissions(this);
+            // verifyPermissions(this);
 
             Intent i = this.getIntent();
             if (TPStrings.ACTION_VIEW.equals(i.getAction())) {
@@ -474,7 +530,6 @@ public class EditorActivity extends AppCompatActivity {
     }
 
     protected void onPause() {
-        // Autosave chỉ áp dụng cho file thật, không áp dụng cho file tạm
         if (settingsService.isAutosavingActive() && !isFilenameEmpty() && !isTempFile && isChanged()) {
             this.saveFileIfNamed(true);
         }
@@ -493,11 +548,12 @@ public class EditorActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
-        // Xóa file tạm nếu nội dung rỗng khi destroy
-        if (isTempFile) {
-            String content = mText.getText().toString().trim();
-            if (content.isEmpty()) {
+        if (isTempFile && changed) {
+            String content = mText.getText().toString();
+            if (content.trim().isEmpty()) {
                 deleteTempFile();
+            } else {
+                autoSaveTempBeforeNew();
             }
         }
         recoveryWriter.shutdown();
@@ -513,7 +569,6 @@ public class EditorActivity extends AppCompatActivity {
                     .setMessage(R.string.Are_you_sure_to_quit)
                     .setNegativeButton(R.string.Yes, (arg0, arg1) -> {
                         discardCurrentRecovery();
-                        // Xóa file tạm nếu nội dung rỗng
                         if (isTempFile && mText.getText().toString().trim().isEmpty()) {
                             deleteTempFile();
                         }
@@ -567,17 +622,10 @@ public class EditorActivity extends AppCompatActivity {
     // ─────────────────────────────────────────────────────────────
 
     public void newFile() {
-        // Không hỏi user — tự động xử lý file hiện tại
         handleCurrentFileBeforeSwitch();
         clearFile();
     }
 
-    /**
-     * Xử lý file hiện tại trước khi chuyển sang file mới / mở file khác.
-     * - isTempFile + nội dung rỗng → xóa file tạm
-     * - isTempFile + có nội dung → giữ nguyên (đã ở trong temp/)
-     * - file thật + có thay đổi → auto save vào notsave/
-     */
     private void handleCurrentFileBeforeSwitch() {
         if (isTempFile) {
             autoSaveTempBeforeNew();
@@ -596,13 +644,9 @@ public class EditorActivity extends AppCompatActivity {
         selectionEnd = 0;
         setEditorText(TPStrings.EMPTY, false);
 
-        // Tạo file tạm mới trong simpletexteditor/temp/
         File tempFile = createNewTempFile();
-        // Ghi file rỗng để file tồn tại trên disk
         try { tempFile.createNewFile(); } catch (IOException ignored) {}
-
-        // Dùng trực tiếp urlFilename, KHÔNG qua setFilename() để tránh ghi vào recent files
-        urlFilename = tempFile.toURI().toString();
+        urlFilename = Uri.fromFile(tempFile).toString();
         isTempFile = true;
 
         initEditor();
@@ -616,14 +660,6 @@ public class EditorActivity extends AppCompatActivity {
     protected void openFile() {
         handleCurrentFileBeforeSwitch();
         openNewFile();
-    }
-
-    private void openRecentFile(int i) {
-        ArrayList<String> lastFiles = recentFilesService.getLastFiles(1, getApplicationContext());
-        if (i >= lastFiles.size()) return;
-        final String filename = lastFiles.get(i);
-        handleCurrentFileBeforeSwitch();
-        openFileByName(filename);
     }
 
     private void openFileByName(String filename) {
@@ -643,7 +679,6 @@ public class EditorActivity extends AppCompatActivity {
 
     protected void saveFile() {
         if (isFilenameEmpty() || isTempFile) {
-            // Gợi ý tên file trong dialog là tên file tạm hiện tại
             saveAs();
         } else {
             saveFileIfNamed();
@@ -656,7 +691,6 @@ public class EditorActivity extends AppCompatActivity {
             intent.addCategory(Intent.CATEGORY_OPENABLE);
             intent.setType("*/*");
             intent.putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes);
-            // Gợi ý tên: nếu đang là temp file thì dùng tên file tạm, không thì NEW_FILE_TXT
             String suggestedName = TPStrings.NEW_FILE_TXT;
             if (isTempFile && !urlFilename.isEmpty()) {
                 try {
@@ -718,11 +752,10 @@ public class EditorActivity extends AppCompatActivity {
                 }
             }
         } else if (requestCode == ACTION_CREATE_FILE) {
-            if (data != null) {
+            if (resultCode == Activity.RESULT_OK && data != null) {
                 persistUriPermissions(data);
                 Uri uri = data.getData();
                 if (uri != null) {
-                    // User đã chọn nơi lưu thật → xóa file tạm, đặt filename thật
                     deleteTempFile();
                     setFilename(uri.toString());
                     nextSaveCreatesDocument = true;
@@ -734,21 +767,23 @@ public class EditorActivity extends AppCompatActivity {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // Filename helpers — không ghi temp vào recent files
+    // Filename helpers
     // ─────────────────────────────────────────────────────────────
 
     private void setFilename(String value) {
         this.urlFilename = value;
-        isTempFile = false; // khi setFilename được gọi với path thật, không còn là temp
+        isTempFile = false;
         storeLastFileName(value);
     }
 
     private void storeLastFileName(String value) {
         if (isFilenameEmpty()) return;
-        if (isTempFile) return; // không ghi temp vào recent
+        if (isTempFile) return;
         if (!settingsService.isShowLastEditedFiles()) return;
         recentFilesService.addRecentFile(value, getApplicationContext());
     }
+
+    private boolean suppressOpenToast = false;
 
     private boolean isFilenameEmpty() {
         return urlFilename == null || urlFilename.equals(TPStrings.EMPTY);
@@ -763,7 +798,6 @@ public class EditorActivity extends AppCompatActivity {
     // ─────────────────────────────────────────────────────────────
 
     protected void exitApplication() {
-        // File tạm rỗng → xóa; file tạm có nội dung → giữ lại trong temp/
         if (isTempFile && mText.getText().toString().trim().isEmpty()) {
             deleteTempFile();
         }
@@ -772,7 +806,66 @@ public class EditorActivity extends AppCompatActivity {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // Phần còn lại không thay đổi
+    // Draft files
+    // ─────────────────────────────────────────────────────────────
+
+    private List<File> loadAllDraftFiles() {
+        List<File> drafts = new ArrayList<>();
+        File dir = getSimpleTextEditorDir();
+        if (!dir.exists()) return drafts;
+        File[] files = dir.listFiles(f -> f.isFile() && f.getName().startsWith("newfile-"));
+        if (files == null) return drafts;
+        java.util.Arrays.sort(files, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+        for (File f : files) drafts.add(f);
+        return drafts;
+    }
+
+    private void updateDraftFiles(Menu menu) {
+        MenuItem draftsMenuItem = menu.findItem(R.id.menu_drafts);
+        if (draftsMenuItem == null) return;
+        List<File> drafts = loadAllDraftFiles();
+        draftsMenuItem.setVisible(!drafts.isEmpty());
+        android.view.SubMenu sub = draftsMenuItem.getSubMenu();
+        if (sub == null) return;
+        sub.clear();
+        int limit = Math.min(drafts.size(), DRAFT_MENU_MAX);
+        for (int i = 0; i < limit; i++) {
+            sub.add(Menu.NONE, DRAFT_MENU_BASE_ID + i, i, formatDraftLabel(drafts.get(i)));
+        }
+    }
+
+    private String formatDraftLabel(File f) {
+        try {
+            // Tên file: newfile-yyyyMMddHHmm-uuid.txt
+            // split với limit=3 → ["newfile", "yyyyMMddHHmm", "uuid.txt"]
+            String[] parts = f.getName().split("-", 3);
+            if (parts.length == 3) {
+                Date date = new SimpleDateFormat("yyyyMMddHHmm", Locale.US).parse(parts[1]);
+                String formatted = new SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()).format(date);
+                String preview = readFilePreview(f, 40);
+                return preview.isEmpty() ? formatted + "  (empty)" : formatted + "  " + preview;
+            }
+        } catch (Exception ignored) {}
+        return f.getName();
+    }
+
+    private String readFilePreview(File f, int maxChars) {
+        if (f.length() == 0) return "";
+        try (FileInputStream fis = new FileInputStream(f)) {
+            byte[] buf = new byte[Math.min((int) f.length(), 256)];
+            int read = fis.read(buf);
+            if (read <= 0) return "";
+            String text = new String(buf, 0, read, settingsService.getFileEncoding()).trim();
+            // Lấy dòng đầu tiên
+            int newline = text.indexOf('\n');
+            if (newline > 0) text = text.substring(0, newline).trim();
+            if (text.length() > maxChars) text = text.substring(0, maxChars) + "…";
+            return text;
+        } catch (Exception e) { return ""; }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // File open helpers
     // ─────────────────────────────────────────────────────────────
 
     private void openFileByUri(Uri u) {
@@ -814,19 +907,6 @@ public class EditorActivity extends AppCompatActivity {
                 }
             }
         };
-    }
-
-    public static void verifyPermissions(Activity activity) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
-        int permission = activity.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE);
-        String[] PERMISSIONS_STORAGE = {
-                Manifest.permission.READ_EXTERNAL_STORAGE,
-                Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                Manifest.permission.WAKE_LOCK,
-        };
-        if (permission != PackageManager.PERMISSION_GRANTED) {
-            activity.requestPermissions(PERMISSIONS_STORAGE, 1);
-        }
     }
 
     @Override
@@ -871,7 +951,10 @@ public class EditorActivity extends AppCompatActivity {
         RecoveryDraft draft = recoveryRepository.loadActive();
         if (draft != null && draft.metadata.untitled) {
             recoveryKey = draft.metadata.recoveryKey;
-            showRecoveryDialog(draft, () -> setEditorText(TPStrings.EMPTY, false));
+            showRecoveryDialog(draft, this::clearFile);
+        }
+        else {
+            clearFile();
         }
     }
 
@@ -1219,44 +1302,24 @@ public class EditorActivity extends AppCompatActivity {
         runFindAll(find);
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // Menu
+    // ─────────────────────────────────────────────────────────────
+
     @Override
     public boolean onPrepareOptionsMenu(Menu menu) {
         MenuItem searchItem = menu.findItem(R.id.menu_document_search);
         if (searchItem.isActionViewExpanded()) searchItem.collapseActionView();
+        menu.findItem(R.id.menu_discard_draft).setVisible(isTempFile);
         menu.findItem(R.id.menu_edit_undo).setEnabled(editTextUndoRedo.getCanUndo());
         menu.findItem(R.id.menu_edit_redo).setEnabled(editTextUndoRedo.getCanRedo());
         menu.findItem(R.id.menu_document_go_to).setEnabled(mText.length() > 0);
         updateRecentFiles(menu);
+        updateDraftFiles(menu);
         if (android.os.Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
             menu.findItem(R.id.menu_document_print).setVisible(false);
         }
         return true;
-    }
-
-    private void updateRecentFiles(Menu menu) {
-        MenuItem recentFilesMenuItem = menu.findItem(R.id.menu_document_open_last);
-        if (!settingsService.isShowLastEditedFiles()) {
-            recentFilesMenuItem.setVisible(false);
-            return;
-        }
-        recentFilesMenuItem.setVisible(true);
-        ArrayList<String> recentFiles = recentFilesService.getLastFiles(1, this.getApplicationContext());
-        MenuItem[] items = {
-            menu.findItem(R.id.menu_document_open_last1),
-            menu.findItem(R.id.menu_document_open_last2),
-            menu.findItem(R.id.menu_document_open_last3),
-            menu.findItem(R.id.menu_document_open_last4),
-            menu.findItem(R.id.menu_document_open_last5)
-        };
-        for (int i = 0; i < items.length; i++) {
-            if (i < recentFiles.size()) {
-                items[i].setVisible(true);
-                items[i].setTitle(FileNameHelper.getFilenameByUri(getApplicationContext(), recentFiles.get(i)));
-            } else {
-                items[i].setVisible(false);
-            }
-        }
-        if (recentFiles.isEmpty()) recentFilesMenuItem.setVisible(false);
     }
 
     @SuppressLint("RestrictedApi")
@@ -1273,28 +1336,47 @@ public class EditorActivity extends AppCompatActivity {
     @Override
     public boolean onOptionsItemSelected(@NonNull MenuItem item) {
         int itemId = item.getItemId();
-        if (itemId == R.id.menu_document_open || itemId == R.id.menu_document_open_other) {
+
+        // Draft menu items — dùng DRAFT_MENU_BASE_ID, không dùng R.id
+        if (itemId >= DRAFT_MENU_BASE_ID && itemId < DRAFT_MENU_BASE_ID + DRAFT_MENU_MAX) {
+            int index = itemId - DRAFT_MENU_BASE_ID;
+            List<File> drafts = loadAllDraftFiles();
+            if (index < drafts.size()) {
+                handleCurrentFileBeforeSwitch();
+                suppressOpenToast = true;
+                openNamedFileLegacyDirect(drafts.get(index).getAbsolutePath());
+            }
+            return true;
+        }
+        if (itemId >= RECENT_MENU_BASE_ID && itemId < RECENT_MENU_BASE_ID + RECENT_MENU_MAX) {
+            int index = itemId - RECENT_MENU_BASE_ID;
+            ArrayList<String> recentFiles = recentFilesService.getLastFiles(0, getApplicationContext());
+            if (index < recentFiles.size()) {
+                handleCurrentFileBeforeSwitch();
+                suppressOpenToast = true;
+                openFileByName(recentFiles.get(index));
+            }
+            return true;
+        }
+
+        if (itemId == R.id.menu_document_open) {
             openFile();
         } else if (itemId == R.id.menu_document_search) {
             initSearch(item);
         } else if (itemId == R.id.menu_document_find_replace) {
             showFindReplaceBar();
-        } else if (itemId == R.id.menu_document_open_last1) { openRecentFile(0);
-        } else if (itemId == R.id.menu_document_open_last2) { openRecentFile(1);
-        } else if (itemId == R.id.menu_document_open_last3) { openRecentFile(2);
-        } else if (itemId == R.id.menu_document_open_last4) { openRecentFile(3);
-        } else if (itemId == R.id.menu_document_open_last5) { openRecentFile(4);
-        } else if (itemId == R.id.menu_document_new) { newFile();
-        } else if (itemId == R.id.menu_document_save) { saveFile();
-        } else if (itemId == R.id.menu_document_save_as) { saveAs();
-        } else if (itemId == R.id.menu_document_go_to_beginning) { moveCaretPosition(0);
-        } else if (itemId == R.id.menu_document_go_to_end) { moveCaretPosition(mText.length());
-        } else if (itemId == R.id.menu_edit_undo) { editUndo();
-        } else if (itemId == R.id.menu_edit_redo) { editRedo();
-        } else if (itemId == R.id.menu_document_share) { shareText();
-        } else if (itemId == R.id.menu_document_print) { printText();
-        } else if (itemId == R.id.menu_document_settings) { showSettings();
-        } else if (itemId == R.id.menu_exit) { exitApplication();
+        } else if (itemId == R.id.menu_document_new)              { newFile();
+        } else if (itemId == R.id.menu_document_save)             { saveFile();
+        } else if (itemId == R.id.menu_document_save_as)          { saveAs();
+        } else if (itemId == R.id.menu_document_go_to_beginning)  { moveCaretPosition(0);
+        } else if (itemId == R.id.menu_document_go_to_end)        { moveCaretPosition(mText.length());
+        } else if (itemId == R.id.menu_edit_undo)                 { editUndo();
+        } else if (itemId == R.id.menu_edit_redo)                 { editRedo();
+        } else if (itemId == R.id.menu_document_share)            { shareText();
+        } else if (itemId == R.id.menu_document_print)            { printText();
+        } else if (itemId == R.id.menu_document_settings)         { showSettings();
+        } else if (itemId == R.id.menu_discard_draft)             { discardDraft();
+        } else if (itemId == R.id.menu_exit)                      { exitApplication();
         }
         return super.onOptionsItemSelected(item);
     }
@@ -1325,6 +1407,19 @@ public class EditorActivity extends AppCompatActivity {
         PrintJob printJob = printManager.print(jobName, printAdapter, new PrintAttributes.Builder().build());
         List<PrintJob> printJobs = new ArrayList<>();
         printJobs.add(printJob);
+    }
+
+    private void discardDraft() {
+        new AlertDialog.Builder(this)
+            .setTitle("Discard Draft")
+            .setMessage("Delete this draft permanently?")
+            .setPositiveButton(R.string.Yes, (dialog, which) -> {
+                deleteTempFile();
+                discardCurrentRecovery();
+                clearFile();
+            })
+            .setNegativeButton(R.string.No, null)
+            .show();
     }
 
     private void shareText() {
@@ -1394,7 +1489,7 @@ public class EditorActivity extends AppCompatActivity {
                     .setMessage(R.string.Existing_file_will_be_overwritten)
                     .setPositiveButton(R.string.Yes, (dialog, which) -> {
                         next_action = DO_OPEN;
-                        EditorActivity.this.saveFile();
+                        EditorActivity.this.saveFileIfNamed();
                     })
                     .setNegativeButton(R.string.No, (dialog, which) -> nextSaveCreatesDocument = false)
                     .setOnCancelListener(dialog -> nextSaveCreatesDocument = false)
@@ -1405,8 +1500,15 @@ public class EditorActivity extends AppCompatActivity {
     }
 
     protected boolean fileAlreadyExists() {
-        File f = new File(getFilename());
-        return f.exists();
+        if (useAndroidManager()) {
+            try {
+                Uri uri = Uri.parse(getFilename());
+                InputStream is = getContentResolver().openInputStream(uri);
+                if (is != null) { is.close(); return true; }
+            } catch (Exception e) { return false; }
+            return false;
+        }
+        return new File(getFilename()).exists();
     }
 
     protected void saveNamedFileLegacy() { guardedSaveNamedFile(false); }
@@ -1508,11 +1610,11 @@ public class EditorActivity extends AppCompatActivity {
         showToast(R.string.File_Written);
         if (editorGeneration == savedGeneration) initEditor();
         updateTitle();
-        if (next_action == DO_OPEN) { next_action = DO_NOTHING; openNewFile();
-        } else if (next_action == DO_NEW) { next_action = DO_NOTHING; clearFile();
+        if (next_action == DO_OPEN)          { next_action = DO_NOTHING; openNewFile();
+        } else if (next_action == DO_NEW)    { next_action = DO_NOTHING; clearFile();
         } else if (next_action == DO_SHOW_SETTINGS) { next_action = DO_NOTHING; showSettingsActivity();
-        } else if (next_action == DO_OPEN_RECENT) { next_action = DO_NOTHING; openFileByName(next_action_filename);
-        } else if (next_action == DO_EXIT) { next_action = DO_NOTHING; exitApplication();
+        } else if (next_action == DO_OPEN_RECENT)   { next_action = DO_NOTHING; openFileByName(next_action_filename);
+        } else if (next_action == DO_EXIT)   { next_action = DO_NOTHING; exitApplication();
         }
     }
 
@@ -1653,13 +1755,25 @@ public class EditorActivity extends AppCompatActivity {
             long size = f.length();
             DataInputStream dis = new DataInputStream(fis);
             byte[] b = new byte[(int) size];
-            int length = dis.read(b, 0, (int) size);
+            int length = dis.readFully(b, 0, (int) size);
             dis.close(); fis.close();
             String ttt = toUnixEndings(new String(b, 0, length, settingsService.getFileEncoding()));
             setEditorText(ttt, false);
-            showToast(getBaseContext().getResources().getString(R.string.File_opened_, filename));
+            if (!suppressOpenToast) {
+                showToast(getBaseContext().getResources().getString(R.string.File_opened_, filename));
+            }
+            suppressOpenToast = false;
             initEditor();
             this.setFilename(filename);
+            Uri fileUri = Uri.fromFile(new File(filename));
+            boolean isTemp = isFileInTextPadDir(fileUri) && isNewfileName(fileUri);
+            if (isTemp) {
+                urlFilename = filename;
+                isTempFile = true;
+            } else {
+                this.setFilename(filename);
+            
+            }
             recordLoadedDocument(b, f.lastModified());
             if (!settingsService.getLastFilename().equals(filename))
                 settingsService.setLastFilename(filename, this.getApplicationContext());
@@ -1691,9 +1805,19 @@ public class EditorActivity extends AppCompatActivity {
             String ttt = toUnixEndings(new String(b, settingsService.getFileEncoding()));
             inputStream.close();
             setEditorText(ttt, false);
-            showToast(getBaseContext().getResources().getString(R.string.File_opened_, getFilename()));
+            if (!suppressOpenToast) {
+                showToast(getBaseContext().getResources().getString(R.string.File_opened_, getFilename()));
+            }
+            suppressOpenToast = false;
             initEditor();
             setFilename(uri.toString());
+            boolean isTemp = isFileInTextPadDir(uri) && isNewfileName(uri);
+            if (isTemp) {
+                urlFilename = uri.toString();
+                isTempFile = true;
+            } else {
+                setFilename(uri.toString());
+            }
             recordLoadedDocument(b, null);
             if (!settingsService.getLastFilename().equals(getFilename()))
                 settingsService.setLastFilename(getFilename(), this.getApplicationContext());
@@ -1704,9 +1828,10 @@ public class EditorActivity extends AppCompatActivity {
             updateTitle();
             detectReadOnlyAccess(uri);
         } catch (FileNotFoundException e) {
+            suppressOpenToast = false;
             if (isAccessDeniedException(e)) showAlternativeFileDialog(uri);
             else this.showToast(R.string.File_not_found);
-        } catch (Exception e) { this.showToast(R.string.Can_not_read_file); }
+        } catch (Exception e) { suppressOpenToast = false; this.showToast(R.string.Can_not_read_file); }
     }
 
     private void detectReadOnlyAccess(final Uri uri) {
@@ -1801,7 +1926,7 @@ public class EditorActivity extends AppCompatActivity {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // TwoFingerPanTouchListener (không thay đổi)
+    // TwoFingerPanTouchListener
     // ─────────────────────────────────────────────────────────────
 
     private class TwoFingerPanTouchListener implements View.OnTouchListener {
@@ -1924,7 +2049,7 @@ public class EditorActivity extends AppCompatActivity {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // QueryTextListener (không thay đổi)
+    // QueryTextListener
     // ─────────────────────────────────────────────────────────────
 
     private class QueryTextListener
