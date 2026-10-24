@@ -16,6 +16,8 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import android.provider.DocumentsContract;
+import android.content.UriPermission;
 import android.widget.Button;
 import android.Manifest;
 import android.annotation.SuppressLint;
@@ -326,17 +328,56 @@ public class EditorActivity extends AppCompatActivity {
     private void openFileByUri(Uri u) {
         if (useAndroidManager()) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-                if (settingsService.isAlternativeFileAccess() &&
-                        alternativeUrlsService.hasAlternativeUrl(u, getApplicationContext())) {
-                    openNamedFile(alternativeUrlsService.getAlternativeUrl(u, getApplicationContext()));
+                boolean hasWrite = false;
+                for (UriPermission perm : getContentResolver().getPersistedUriPermissions()) {
+                    if (perm.getUri().equals(u) && perm.isWritePermission()) {
+                        hasWrite = true;
+                        break;
+                    }
+                }
+                if (hasWrite) {
+                    if (settingsService.isAlternativeFileAccess() &&
+                            alternativeUrlsService.hasAlternativeUrl(u, getApplicationContext())) {
+                        openNamedFile(alternativeUrlsService.getAlternativeUrl(u, getApplicationContext()));
+                    } else {
+                        openNamedFile(u);
+                    }
                 } else {
                     openNamedFile(u);
+                    mText.post(() -> showReOpenForEditDialog(u));
                 }
             }
         } else {
             openNamedFileLegacy(u.getPath());
         }
     }
+
+    private void showReOpenForEditDialog(Uri u) {
+        new AlertDialog.Builder(this)
+            .setTitle("Open for editing")
+            .setMessage("File opened as read-only. Open again to enable editing and saving?")
+            .setPositiveButton("Open for Edit", (dialog, which) -> {
+                lastTriedSystemUri = u;
+                selectFileUsingAndroidSystemPicker();
+            })
+            .setNegativeButton("Read Only", null)
+            .show();
+    }
+
+    // private void openFileByUri(Uri u) {
+    //     if (useAndroidManager()) {
+    //         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+    //             if (settingsService.isAlternativeFileAccess() &&
+    //                     alternativeUrlsService.hasAlternativeUrl(u, getApplicationContext())) {
+    //                 openNamedFile(alternativeUrlsService.getAlternativeUrl(u, getApplicationContext()));
+    //             } else {
+    //                 openNamedFile(u);
+    //             }
+    //         }
+    //     } else {
+    //         openNamedFileLegacy(u.getPath());
+    //     }
+    // }
 
     private void setTextWatcher() {
         textWatcher = new TextWatcher() {
@@ -1412,7 +1453,7 @@ public class EditorActivity extends AppCompatActivity {
             System.exitFromApp(EditorActivity.this);
         }
     }
-
+    
     protected void selectFileUsingAndroidSystemPicker() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
@@ -1420,8 +1461,21 @@ public class EditorActivity extends AppCompatActivity {
         intent.putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes);
         intent.putExtra(Intent.EXTRA_TITLE, TPStrings.NEW_FILE_TXT);
         intent.putExtra("android.content.extra.SHOW_ADVANCED", true);
+        if (lastTriedSystemUri != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, lastTriedSystemUri);
+        }
         startActivityForResult(intent, ACTION_OPEN_FILE);
     }
+
+    // protected void selectFileUsingAndroidSystemPicker() {
+    //     Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+    //     intent.addCategory(Intent.CATEGORY_OPENABLE);
+    //     intent.setType("*/*");
+    //     intent.putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes);
+    //     intent.putExtra(Intent.EXTRA_TITLE, TPStrings.NEW_FILE_TXT);
+    //     intent.putExtra("android.content.extra.SHOW_ADVANCED", true);
+    //     startActivityForResult(intent, ACTION_OPEN_FILE);
+    // }
 
     protected void openNewFile() {
         if (useAndroidManager()) {
