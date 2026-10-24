@@ -1207,9 +1207,35 @@ public class EditorActivity extends AppCompatActivity {
         }
     }
 
+    private String lastSearchQuery = "";
+    private void showFindReplaceBar() {
+        View bar = findViewById(R.id.find_replace_bar);
+        if (bar == null) return;
+        bar.setVisibility(View.VISIBLE);
+        EditText findInput = findViewById(R.id.find_input);
+        if (findInput != null) findInput.requestFocus();
+        
+        findViewById(R.id.btn_find_prev).setOnClickListener(v -> findMove(-1));
+        findViewById(R.id.btn_find_next).setOnClickListener(v -> {
+            String query = findInput.getText().toString();
+            if (!query.equals(lastSearchQuery)) {
+                lastSearchQuery = query;
+                runFindAll(query);
+            } else {
+                findMove(1);
+            }
+        });
+        findViewById(R.id.btn_find_close).setOnClickListener(v -> hideFindReplaceBar());
+        findViewById(R.id.btn_replace_one).setOnClickListener(v -> replaceNext());
+        findViewById(R.id.btn_replace_all).setOnClickListener(v -> replaceAll());
+    }
+
     private void hideFindReplaceBar() {
         View bar = findViewById(R.id.find_replace_bar);
         if (bar != null) bar.setVisibility(View.GONE);
+        lastSearchQuery = "";
+        findResults.clear();
+        findCurrentIndex = -1;
         mText.requestFocus();
     }
 
