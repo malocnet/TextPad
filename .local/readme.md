@@ -60,7 +60,7 @@ Sau khi màn hình báo BUILD SUCCESSFUL, file APK của bạn sẽ nằm tại 
 [Thư-mục-dự-án]app/build/outputs/apk/release/app-release.apk
 
 ```bash
-cp app/build/outputs/apk/release/app-release.apk /mnt/data/hoainh/Documents/TextPad/TextPad-v0.0.1.apk
+cp app/build/outputs/apk/release/app-release.apk /mnt/data/hoainh/Documents/TextPad/TextPad-release-v0.0.1.apk
 ```
 =========================================
 Vậy tóm tắt thiết kế cuối cùng:
