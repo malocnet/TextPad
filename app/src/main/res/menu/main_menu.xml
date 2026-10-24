@@ -6,6 +6,7 @@
         android:id="@+id/menu_document_search"
         android:title="@string/Search"
         android:icon="@drawable/ic_search"
+        app:iconTint="@color/colorIcon"
         app:actionViewClass="android.widget.SearchView"
         app:showAsAction="ifRoom|collapseActionView" />
 
@@ -13,18 +14,21 @@
         android:id="@+id/menu_document_find_replace"
         android:title="Find &amp; Replace"
         android:icon="@drawable/ic_find_replace"
+        app:iconTint="@color/colorIcon"
         app:showAsAction="ifRoom|collapseActionView" />
 
     <item
         android:id="@+id/menu_edit_undo"
         android:title="@string/action_undo"
         android:icon="@drawable/ic_undo"
+        app:iconTint="@color/colorIcon"
         app:showAsAction="ifRoom|collapseActionView" />
 
     <item
         android:id="@+id/menu_edit_redo"
         android:title="@string/action_redo"
         android:icon="@drawable/ic_redo"
+        app:iconTint="@color/colorIcon"
         app:showAsAction="ifRoom|collapseActionView" />
 
     <item
@@ -50,6 +54,7 @@
     <item
         android:id="@+id/menu_drafts"
         android:title="@string/Drafts"
+        app:iconTint="@color/colorIcon"
         android:visible="false">
         <menu/>
     </item>
