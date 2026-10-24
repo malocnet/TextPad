@@ -1286,9 +1286,9 @@ public class EditorActivity extends AppCompatActivity {
         String newContent = content.replace(find, replace);
         if (!content.equals(newContent)) {
             mText.setText(newContent);
-            showToast(R.string.replaced_all_occurrences); 
+            showToast("Replaced all occurrences");
         } else {
-            showToast(formatString(R.string.s_not_found, find));
+            showToast(find + " not found");
         }
         runFindAll(find);
     }
@@ -1402,8 +1402,8 @@ public class EditorActivity extends AppCompatActivity {
 
     private void discardDraft() {
         new AlertDialog.Builder(this)
-            .setTitle(R.string.discard_draft_title)
-            .setMessage(R.string.discard_draft_message)
+            .setTitle("Discard Draft")
+            .setMessage("Delete this draft permanently?")
             .setPositiveButton(R.string.Yes, (dialog, which) -> {
                 deleteTempFile();
                 discardCurrentRecovery();

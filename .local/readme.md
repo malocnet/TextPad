@@ -19,6 +19,42 @@ Sau khi màn hình báo BUILD SUCCESSFUL, file APK của bạn sẽ nằm tại 
 ```bash
 cp /mnt/data/hoainh/Documents/TextPad/app/build/outputs/apk/debug/app-debug.apk /mnt/data/hoainh/Documents/TextPad/TextPad-v0.0.3.apk
 ```
+
+
+
+# Apk Relaese
+```bash
+keytool -genkeypair -v \
+  -keystore release-key.jks \
+  -keyalg RSA -keysize 2048 -validity 10000 \
+  -alias textpadalias \
+  -storepass TextPadPass123@MyStrong \
+  -keypass TextPadPass123@MyStrong \
+  -dname "CN=malocnet, OU=None, O=None, L=Ho Chi Minh City, ST=Ho Chi Minh, C=VN"
+```
+
+```bash
+export ANDROID_KEYSTORE=./release-key.jks
+export KEYSTORE_PASSWORD=TextPadPass123@MyStrong
+export KEY_ALIAS=textpadalias
+export KEY_PASSWORD=TextPadPass123@MyStrong
+```
+
+```bash
+./gradlew clean assembleRelease
+```
+
+Nếu muốn verify APK đã ký đúng chưa:
+
+```bash
+apksigner verify --verbose app/build/outputs/apk/release/app-release.apk
+```
+
+Hoặc xem thông tin ký:
+
+```bash
+apksigner verify --print-certs app/build/outputs/apk/release/app-release.apk
+```
 =========================================
 Vậy tóm tắt thiết kế cuối cùng:
 
