@@ -55,6 +55,13 @@ Hoặc xem thông tin ký:
 ```bash
 apksigner verify --print-certs app/build/outputs/apk/release/app-release.apk
 ```
+
+Sau khi màn hình báo BUILD SUCCESSFUL, file APK của bạn sẽ nằm tại đường dẫn:
+[Thư-mục-dự-án]app/build/outputs/apk/release/app-release.apk
+
+```bash
+cp app/build/outputs/apk/release/app-release.apk /mnt/data/hoainh/Documents/TextPad/TextPad-v0.0.1.apk
+```
 =========================================
 Vậy tóm tắt thiết kế cuối cùng:
 
