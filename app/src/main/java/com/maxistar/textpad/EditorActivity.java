@@ -123,8 +123,6 @@ public class EditorActivity extends AppCompatActivity {
     private static final int DRAFT_MENU_BASE_ID = 0x00f00000;
     private static final int DRAFT_MENU_MAX = 50;
 
-    private static final String LOG_TAG = "TextEditor";
-
     String[] mimeTypes = {
             "*/*",
             "text/*",
@@ -373,13 +371,6 @@ public class EditorActivity extends AppCompatActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
-            new AlertDialog.Builder(this)
-                .setTitle("Bug")
-                .setMessage(throwable.toString())
-                .setPositiveButton("OK", null)
-                .show();
-        });
 
         settingsService = ServiceLocator.getInstance().getSettingsService(this.getApplicationContext());
         recentFilesService = ServiceLocator.getInstance().getRecentFilesService();
@@ -1295,9 +1286,9 @@ public class EditorActivity extends AppCompatActivity {
         String newContent = content.replace(find, replace);
         if (!content.equals(newContent)) {
             mText.setText(newContent);
-            showToast("Replaced all occurrences");
+            showToast(R.string.replaced_all_occurrences); 
         } else {
-            showToast(find + " not found");
+            showToast(formatString(R.string.s_not_found, find));
         }
         runFindAll(find);
     }
@@ -1411,8 +1402,8 @@ public class EditorActivity extends AppCompatActivity {
 
     private void discardDraft() {
         new AlertDialog.Builder(this)
-            .setTitle("Discard Draft")
-            .setMessage("Delete this draft permanently?")
+            .setTitle(R.string.discard_draft_title)
+            .setMessage(R.string.discard_draft_message)
             .setPositiveButton(R.string.Yes, (dialog, which) -> {
                 deleteTempFile();
                 discardCurrentRecovery();
@@ -1755,16 +1746,15 @@ public class EditorActivity extends AppCompatActivity {
             long size = f.length();
             DataInputStream dis = new DataInputStream(fis);
             byte[] b = new byte[(int) size];
-            int length = dis.readFully(b, 0, (int) size);
+            dis.readFully(b, 0, (int) size);
             dis.close(); fis.close();
-            String ttt = toUnixEndings(new String(b, 0, length, settingsService.getFileEncoding()));
+            String ttt = toUnixEndings(new String(b, settingsService.getFileEncoding()));
             setEditorText(ttt, false);
             if (!suppressOpenToast) {
                 showToast(getBaseContext().getResources().getString(R.string.File_opened_, filename));
             }
             suppressOpenToast = false;
             initEditor();
-            this.setFilename(filename);
             Uri fileUri = Uri.fromFile(new File(filename));
             boolean isTemp = isFileInTextPadDir(fileUri) && isNewfileName(fileUri);
             if (isTemp) {
@@ -1810,7 +1800,6 @@ public class EditorActivity extends AppCompatActivity {
             }
             suppressOpenToast = false;
             initEditor();
-            setFilename(uri.toString());
             boolean isTemp = isFileInTextPadDir(uri) && isNewfileName(uri);
             if (isTemp) {
                 urlFilename = uri.toString();
