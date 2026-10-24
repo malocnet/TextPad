@@ -1185,28 +1185,6 @@ public class EditorActivity extends AppCompatActivity {
         }
     }
 
-    private void showFindReplaceBar() {
-        View bar = findViewById(R.id.find_replace_bar);
-        if (bar == null) return;
-        bar.setVisibility(View.VISIBLE);
-        EditText findInput = findViewById(R.id.find_input);
-        if (findInput != null) findInput.requestFocus();
-        findViewById(R.id.btn_find_prev).setOnClickListener(v -> findMove(-1));
-        findViewById(R.id.btn_find_next).setOnClickListener(v -> findMove(1));
-        findViewById(R.id.btn_find_close).setOnClickListener(v -> hideFindReplaceBar());
-        findViewById(R.id.btn_replace_one).setOnClickListener(v -> replaceNext());
-        findViewById(R.id.btn_replace_all).setOnClickListener(v -> replaceAll());
-        if (findInput != null) {
-            findInput.addTextChangedListener(new TextWatcher() {
-                @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-                @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
-                    runFindAll(s.toString());
-                }
-                @Override public void afterTextChanged(Editable s) {}
-            });
-        }
-    }
-
     private String lastSearchQuery = "";
     private void showFindReplaceBar() {
         View bar = findViewById(R.id.find_replace_bar);
