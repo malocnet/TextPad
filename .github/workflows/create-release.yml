@@ -90,10 +90,3 @@ jobs:
     with:
       tag: ${{ needs.create-tag.outputs.tag }}
     secrets: inherit
-
-  promote-production:
-    needs: [create-tag, publish]
-    uses: ./.github/workflows/promote-production.yml
-    with:
-      tag: ${{ needs.create-tag.outputs.tag }}
-    secrets: inherit
