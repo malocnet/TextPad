@@ -1,8 +1,6 @@
 name: Create Android Release
 
 on:
-  # Use the trusted base ref so release/production environment policies evaluate
-  # this post-merge run as master rather than refs/pull/<number>/merge.
   pull_request_target:
     branches: [master]
     types: [closed]
@@ -38,7 +36,7 @@ jobs:
     outputs:
       tag: ${{ steps.identity.outputs.tag }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha || inputs.commit_sha }}
           fetch-depth: 0
@@ -68,14 +66,6 @@ jobs:
             --merge-commit "$MERGE_COMMIT" \
             --merged "$MERGED" > release-candidate.json
           echo "tag=$(python3 -c 'import json; print(json.load(open("release-candidate.json"))["tag"])')" >> "$GITHUB_OUTPUT"
-      - name: Decode Google Play service account
-        env:
-          SERVICE_ACCOUNT_BASE64: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT }}
-        run: printf '%s' "$SERVICE_ACCOUNT_BASE64" | base64 --decode > service-account.json
-      - name: Repeat repository and Google Play validation
-        run: >-
-          python3 scripts/release_tool.py validate --skip-branch --check-play
-          --service-account service-account.json
       - name: Create immutable annotated tag
         env:
           TAG: ${{ steps.identity.outputs.tag }}
