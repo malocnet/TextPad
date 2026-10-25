@@ -32,7 +32,7 @@ jobs:
           if [ -n "$INPUT_TAG" ]; then TAG="$INPUT_TAG"; else TAG="$REF_TAG"; fi
           case "$TAG" in v[0-9]*.[0-9]*.[0-9]*) ;; *) exit 2 ;; esac
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ steps.requested.outputs.tag }}
           fetch-depth: 0
