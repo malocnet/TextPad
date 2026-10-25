@@ -96,24 +96,3 @@ jobs:
           CODE=$(python3 scripts/release_tool.py metadata | python3 -c 'import json,sys; print(json.load(sys.stdin)["versionCode"])')
           NOTES="fastlane/metadata/android/en-US/changelogs/$CODE.txt"
           gh release create "$TAG" release-artifacts/* --verify-tag --title "$TAG" --notes-file "$NOTES"
-      - name: Decode Google Play service account
-        env:
-          SERVICE_ACCOUNT_BASE64: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT }}
-        run: printf '%s' "$SERVICE_ACCOUNT_BASE64" | base64 --decode > service-account.json
-      - name: Use current delivery lane for manual recovery
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          git fetch origin master
-          git show origin/master:fastlane/Fastfile > fastlane/Fastfile
-      - name: Upload the published APK to Play internal
-        env:
-          TAG: ${{ steps.requested.outputs.tag }}
-        run: |
-          CODE=$(python3 scripts/release_tool.py metadata | python3 -c 'import json,sys; print(json.load(sys.stdin)["versionCode"])')
-          bundle exec fastlane android upload_release \
-            apk:${{ github.workspace }}/release-artifacts/TextPad-$TAG.apk \
-            aab:${{ github.workspace }}/release-artifacts/TextPad-$TAG.aab \
-            version_code:$CODE \
-            metadata_path:${{ github.workspace }}/fastlane/metadata/android \
-            json_key:${{ github.workspace }}/service-account.json \
-            track:internal
