@@ -13,6 +13,8 @@
         android:id="@+id/linear_layout"
         android:layout_width="match_parent"
         android:layout_height="0dp"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
         android:layout_weight="1">
 
         <EditText
@@ -26,8 +28,6 @@
             android:inputType="text|textAutoComplete|textAutoCorrect"
             android:overScrollMode="ifContentScrolls"
             android:padding="5dip"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp"
             android:saveEnabled="false"
             android:scrollbars="vertical" />
     </LinearLayout>
