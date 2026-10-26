@@ -7,6 +7,7 @@ import android.content.res.Resources;
 import android.preference.PreferenceManager;
 
 import com.maxistar.textpad.TPStrings;
+import android.view.View;
 
 import java.util.Locale;
 
@@ -275,10 +276,6 @@ public class SettingsService {
 
     public boolean isAlternativeFileAccess() {
         return alternative_file_access;
-    }
-
-    public boolean isThemeForced() {
-        return COLOR_THEME_DARK.equals(colorThemeType) || COLOR_THEME_LIGHT.equals(colorThemeType);
     }
 
     public boolean isCustomTheme() {

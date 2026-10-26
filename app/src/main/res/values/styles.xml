@@ -11,6 +11,7 @@
     <item name="colorPrimary">@color/colorPrimary</item>
     <item name="colorAccent">@color/colorAccent</item>
     <item name="alertDialogTheme">@style/AppTheme.AlertDialog</item>
+    <item name="android:statusBarColor">@color/colorPrimary</item>
 </style>
 
 <style name="AppTheme.AlertDialog" parent="Theme.AppCompat.DayNight.Dialog.Alert">
