@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="512dp"
+    android:height="512dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+
+    <!-- Background rounded -->
+    <path
+        android:pathData="M 0,110 Q 0,0 110,0 L 402,0 Q 512,0 512,110 L 512,402 Q 512,512 402,512 L 110,512 Q 0,512 0,402 Z"
+        android:fillColor="#F5F5F5" />
+
+    <!-- Paper body -->
+    <path
+        android:pathData="M 120,80 L 336,80 L 406,150 L 406,436 Q 406,450 392,450 L 120,450 Q 106,450 106,436 L 106,94 Q 106,80 120,80 Z"
+        android:fillColor="#FFFFFF"
+        android:strokeColor="#111111"
+        android:strokeWidth="14"
+        android:strokeLineJoin="round" />
+
+    <!-- Dog-ear fold -->
+    <path
+        android:pathData="M 336,80 L 406,150 L 336,150 Z"
+        android:fillColor="#CCCCCC"
+        android:strokeColor="#111111"
+        android:strokeWidth="14"
+        android:strokeLineJoin="round" />
+
+    <!-- Text line 1 -->
+    <path
+        android:pathData="M 140,185 L 360,185"
+        android:strokeColor="#111111"
+        android:strokeWidth="11"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- Text line 2 -->
+    <path
+        android:pathData="M 140,230 L 360,230"
+        android:strokeColor="#111111"
+        android:strokeWidth="11"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- Text line 3 -->
+    <path
+        android:pathData="M 140,275 L 360,275"
+        android:strokeColor="#111111"
+        android:strokeWidth="11"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- Text line 4 -->
+    <path
+        android:pathData="M 140,320 L 280,320"
+        android:strokeColor="#111111"
+        android:strokeWidth="11"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- Green dot -->
+    <path
+        android:pathData="M 178,390 m -34,0 a 34,34 0 1,0 68,0 a 34,34 0 1,0 -68,0"
+        android:fillColor="#3A9B3A"
+        android:strokeColor="#00000000" />
+
+    <!-- Pencil group (góc phải dưới tờ giấy) -->
+    <group
+        android:translateX="390"
+        android:translateY="310"
+        android:pivotX="0"
+        android:pivotY="0"
+        android:rotation="35">
+
+        <!-- Eraser -->
+        <path
+            android:pathData="M -12,-18 L 12,-18 Q 17,-18 17,-13 L 17,0 L -17,0 L -17,-13 Q -17,-18 -12,-18 Z"
+            android:fillColor="#CCCCCC"
+            android:strokeColor="#111111"
+            android:strokeWidth="9"
+            android:strokeLineJoin="round" />
+
+        <!-- Pencil body -->
+        <path
+            android:pathData="M -14,0 Q -17,0 -17,3 L -17,152 Q -17,155 -14,155 L 14,155 Q 17,155 17,152 L 17,3 Q 17,0 14,0 Z"
+            android:fillColor="#2E7FD4"
+            android:strokeColor="#111111"
+            android:strokeWidth="9" />
+
+        <!-- Pencil tip bevel -->
+        <path
+            android:pathData="M -17,153 L 17,153 L 8,185 L 0,200 L -8,185 Z"
+            android:fillColor="#EEDD99"
+            android:strokeColor="#111111"
+            android:strokeWidth="8"
+            android:strokeLineJoin="round" />
+
+        <!-- Pencil sharp tip -->
+        <path
+            android:pathData="M -5,183 L 5,183 L 0,200 Z"
+            android:fillColor="#1A1A1A"
+            android:strokeColor="#00000000" />
+
+    </group>
+
+</vector>

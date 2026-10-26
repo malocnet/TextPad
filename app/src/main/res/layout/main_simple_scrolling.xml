@@ -29,6 +29,7 @@
             android:overScrollMode="ifContentScrolls"
             android:padding="5dip"
             android:saveEnabled="false"
+            android:textColorHint="@color/hint_color"
             android:scrollbars="vertical" />
     </LinearLayout>
 </LinearLayout>

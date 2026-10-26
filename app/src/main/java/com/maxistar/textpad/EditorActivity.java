@@ -19,17 +19,13 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.text.DateFormat;
 
-import android.provider.DocumentsContract;
-import android.content.UriPermission;
-import android.widget.Button;
-// import android.Manifest;
+
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
-// import android.content.pm.PackageManager;
 import android.graphics.Typeface;
 import android.graphics.Insets;
 import android.graphics.Rect;
@@ -89,7 +85,6 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.view.menu.MenuBuilder;
 import androidx.appcompat.widget.Toolbar;
 
-import android.content.DialogInterface;
 import android.text.SpannableString;
 import android.text.method.LinkMovementMethod;
 import android.text.style.UnderlineSpan;
@@ -721,17 +716,14 @@ public class EditorActivity extends AppCompatActivity {
                 setFilename(data.getStringExtra(TPStrings.RESULT_PATH));
                 nextSaveCreatesDocument = true;
                 this.saveFileWithConfirmation();
-            } else if (resultCode == Activity.RESULT_CANCELED) {
-                showToast(R.string.Operation_Canceled);
             }
         } else if (requestCode == REQUEST_OPEN) {
             if (resultCode == Activity.RESULT_OK) {
                 this.openNamedFileLegacy(data.getStringExtra(TPStrings.RESULT_PATH));
-            } else if (resultCode == Activity.RESULT_CANCELED) {
-                showToast(R.string.Operation_Canceled);
             }
         } else if (requestCode == REQUEST_SETTINGS) {
             applyPreferences();
+            recreate();
         } else if (requestCode == ACTION_OPEN_FILE && resultCode == Activity.RESULT_OK) {
             if (data != null) {
                 Uri uri = data.getData();
@@ -773,8 +765,6 @@ public class EditorActivity extends AppCompatActivity {
         if (!settingsService.isShowLastEditedFiles()) return;
         recentFilesService.addRecentFile(value, getApplicationContext());
     }
-
-    private boolean suppressOpenToast = false;
 
     private boolean isFilenameEmpty() {
         return urlFilename == null || urlFilename.equals(TPStrings.EMPTY);
@@ -1096,7 +1086,6 @@ public class EditorActivity extends AppCompatActivity {
             } else {
                 this.openNamedFileLegacy(settingsService.getLastFilename());
             }
-            showToast(formatString(R.string.opened_last_edited_file, settingsService.getLastFilename()));
         } else {
             offerActiveUntitledRecovery();
         }
@@ -1157,19 +1146,25 @@ public class EditorActivity extends AppCompatActivity {
         }
     }
 
+
     private void applyColors() {
         mText.setHighlightColor(settingsService.getTextSelectionColor());
-        if (settingsService.isThemeForced()) {
-            ThemeService themeService = ServiceLocator.getInstance().getThemeService(this);
-            themeService.applyColorTheme(this);
-        }
-        if (settingsService.isCustomTheme()) {
+        
+        String theme = settingsService.getColorThemeType();
+        
+        if (SettingsService.COLOR_THEME_LIGHT.equals(theme)) {
+            // Light: force white background and black text on editor
+            if (simpleScrolling()) linearLayout.setBackgroundColor(0xFFFFFFFF);
+            else scrollView.setBackgroundColor(0xFFFFFFFF);
+            mText.setTextColor(0xFF000000);
+        } else if (settingsService.isCustomTheme()) {
+            // Custom: user-defined colors
             if (simpleScrolling()) linearLayout.setBackgroundColor(settingsService.getBgColor());
             else scrollView.setBackgroundColor(settingsService.getBgColor());
             mText.setTextColor(settingsService.getFontColor());
         }
     }
-
+    
     private QueryTextListener getQueryTextListener() {
         if (queryTextListener == null) queryTextListener = new QueryTextListener();
         return queryTextListener;
@@ -1318,7 +1313,7 @@ public class EditorActivity extends AppCompatActivity {
     public boolean onPrepareOptionsMenu(Menu menu) {
         MenuItem searchItem = menu.findItem(R.id.menu_document_search);
         if (searchItem.isActionViewExpanded()) searchItem.collapseActionView();
-        menu.findItem(R.id.menu_discard_draft).setVisible(isTempFile);
+        menu.findItem(R.id.menu_discard_draft).setVisible(isTempFile || changed);
         menu.findItem(R.id.menu_edit_undo).setEnabled(editTextUndoRedo.getCanUndo());
         menu.findItem(R.id.menu_edit_redo).setEnabled(editTextUndoRedo.getCanRedo());
         menu.findItem(R.id.menu_document_go_to).setEnabled(mText.length() > 0);
@@ -1351,7 +1346,6 @@ public class EditorActivity extends AppCompatActivity {
             List<File> drafts = loadAllDraftFiles();
             if (index < drafts.size()) {
                 handleCurrentFileBeforeSwitch();
-                suppressOpenToast = true;
                 openNamedFileLegacyDirect(drafts.get(index).getAbsolutePath());
             }
             return true;
@@ -1361,7 +1355,6 @@ public class EditorActivity extends AppCompatActivity {
             ArrayList<String> recentFiles = recentFilesService.getLastFiles(0, getApplicationContext());
             if (index < recentFiles.size()) {
                 handleCurrentFileBeforeSwitch();
-                suppressOpenToast = true;
                 openFileByName(recentFiles.get(index));
             }
             return true;
@@ -1418,16 +1411,28 @@ public class EditorActivity extends AppCompatActivity {
     }
 
     private void discardDraft() {
-        new AlertDialog.Builder(this)
-            .setTitle("Discard Draft")
-            .setMessage("Delete this draft permanently?")
-            .setPositiveButton(R.string.Yes, (dialog, which) -> {
-                deleteTempFile();
-                discardCurrentRecovery();
-                clearFile();
-            })
-            .setNegativeButton(R.string.No, null)
-            .show();
+        if (isTempFile) {
+            new AlertDialog.Builder(this)
+                .setTitle("Discard Draft")
+                .setMessage("Delete this draft permanently?")
+                .setPositiveButton(R.string.Yes, (dialog, which) -> {
+                    deleteTempFile();
+                    discardCurrentRecovery();
+                    clearFile();
+                })
+                .setNegativeButton(R.string.No, null)
+                .show();
+        } else {
+            new AlertDialog.Builder(this)
+                .setTitle("Discard Changes")
+                .setMessage("Reload file and lose all unsaved changes?")
+                .setPositiveButton(R.string.Yes, (dialog, which) -> {
+                    discardCurrentRecovery();
+                    loadStoredDocumentAfterDiscard();
+                })
+                .setNegativeButton(R.string.No, null)
+                .show();
+        }
     }
 
     private void shareText() {
@@ -1767,10 +1772,7 @@ public class EditorActivity extends AppCompatActivity {
             dis.close(); fis.close();
             String ttt = toUnixEndings(new String(b, settingsService.getFileEncoding()));
             setEditorText(ttt, false);
-            if (!suppressOpenToast) {
-                showToast(getBaseContext().getResources().getString(R.string.File_opened_, filename));
-            }
-            suppressOpenToast = false;
+            
             initEditor();
             Uri fileUri = Uri.fromFile(new File(filename));
             boolean isTemp = isFileInTextPadDir(fileUri) && isNewfileName(fileUri);
@@ -1812,10 +1814,7 @@ public class EditorActivity extends AppCompatActivity {
             String ttt = toUnixEndings(new String(b, settingsService.getFileEncoding()));
             inputStream.close();
             setEditorText(ttt, false);
-            if (!suppressOpenToast) {
-                showToast(getBaseContext().getResources().getString(R.string.File_opened_, getFilename()));
-            }
-            suppressOpenToast = false;
+            
             initEditor();
             boolean isTemp = isFileInTextPadDir(uri) && isNewfileName(uri);
             if (isTemp) {
@@ -1834,10 +1833,10 @@ public class EditorActivity extends AppCompatActivity {
             updateTitle();
             detectReadOnlyAccess(uri);
         } catch (FileNotFoundException e) {
-            suppressOpenToast = false;
+            
             if (isAccessDeniedException(e)) showAlternativeFileDialog(uri);
             else this.showToast(R.string.File_not_found);
-        } catch (Exception e) { suppressOpenToast = false; this.showToast(R.string.Can_not_read_file); }
+        } catch (Exception e) {  this.showToast(R.string.Can_not_read_file); }
     }
 
     private void detectReadOnlyAccess(final Uri uri) {

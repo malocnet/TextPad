@@ -2,6 +2,7 @@ package com.maxistar.textpad.activities;
 
 import java.nio.charset.Charset;
 import java.util.ArrayList;
+import java.util.Locale;
 import java.util.Map;
 
 import android.app.AlertDialog;
@@ -10,6 +11,7 @@ import android.content.SharedPreferences;
 import android.content.SharedPreferences.OnSharedPreferenceChangeListener;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager.NameNotFoundException;
+import android.content.res.Configuration;
 import android.os.Build;
 import android.os.Bundle;
 import android.preference.ListPreference;
@@ -22,6 +24,7 @@ import com.maxistar.textpad.ServiceLocator;
 import com.maxistar.textpad.service.SettingsService;
 import com.maxistar.textpad.TPStrings;
 import com.maxistar.textpad.service.AlternativeUrlsService;
+import com.maxistar.textpad.service.ThemeService;
 
 public class SettingsActivity extends PreferenceActivity implements OnSharedPreferenceChangeListener {
 
@@ -36,7 +39,6 @@ public class SettingsActivity extends PreferenceActivity implements OnSharedPref
         super.onCreate(savedInstanceState);
         settingsService = ServiceLocator.getInstance().getSettingsService(getApplicationContext());
         alternativeUrlsService = ServiceLocator.getInstance().getAlternativeUrlsService();
-        settingsService.applyLocale(this.getBaseContext());
         addPreferencesFromResource(R.xml.preferences);
 
         if (hideLegacyPicker()) {
@@ -71,15 +73,7 @@ public class SettingsActivity extends PreferenceActivity implements OnSharedPref
 
         encoding.setEntries(entries.toArray(entries_arr));
         encoding.setEntryValues(entry_values.toArray(entry_values_arr));
-
-
-        SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
-        String value = sharedPreferences.getString(SettingsService.SETTING_COLOR_THEME_TYPE, SettingsService.COLOR_THEME_EMPTY);
-        Preference colorPreference = this.findPreference(SettingsService.SETTING_FONT_COLOR);
-        colorPreference.setEnabled(SettingsService.COLOR_THEME_CUSTOM.equals(value));
-        Preference backgroundColorPreference = this.findPreference(SettingsService.SETTING_BG_COLOR);
-        backgroundColorPreference.setEnabled(SettingsService.COLOR_THEME_CUSTOM.equals(value));
-
+        
         initAlternativeLocations();
     }
 
@@ -141,34 +135,41 @@ public class SettingsActivity extends PreferenceActivity implements OnSharedPref
 
         // Unregister the listener whenever a key changes
         PreferenceManager.getDefaultSharedPreferences(this).unregisterOnSharedPreferenceChangeListener(this);
-        settingsService.reloadSettings(this.getBaseContext());
+        settingsService.reloadSettings(this.getApplicationContext());
     }
 
     public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
+        if (SettingsService.SETTING_COLOR_THEME_TYPE.equals(key)) {
+            settingsService.reloadSettings(this.getApplicationContext());
+            ThemeService themeService = ServiceLocator.getInstance().getThemeService(this);
+            themeService.applyColorTheme(this);
+            Intent intent = getIntent();
+            finish();
+            startActivity(intent);
+            return;
+        }
         if (SettingsService.SETTING_LANGUAGE.equals(key) ||
             SettingsService.SETTING_FONT.equals(key) ||
             SettingsService.SETTING_BG_COLOR.equals(key) ||
             SettingsService.SETTING_FONT_COLOR.equals(key) ||
             SettingsService.SETTING_FONT_SIZE.equals(key) ||
-            SettingsService.SETTING_USE_SIMPLE_SCROLLING.equals(key)
+            SettingsService.SETTING_COLOR_THEME_TYPE.equals(key)  // ← thêm dòng này
         ) {
-            String lang = sharedPreferences.getString(SettingsService.SETTING_LANGUAGE, TPStrings.EMPTY);
+            String lang = sharedPreferences.getString(SettingsService.SETTING_LANGUAGE, TPStrings.EN);
             setLocale(lang);
             SettingsService.setLanguageChangedFlag();
-        }
-        if (SettingsService.SETTING_COLOR_THEME_TYPE.equals(key)) {
-            String value = sharedPreferences.getString(SettingsService.SETTING_COLOR_THEME_TYPE, SettingsService.COLOR_THEME_EMPTY);
-            Preference colorPreference = this.findPreference(SettingsService.SETTING_FONT_COLOR);
-            colorPreference.setEnabled(SettingsService.COLOR_THEME_CUSTOM.equals(value));
-            Preference backgroundColorPreference = this.findPreference(SettingsService.SETTING_BG_COLOR);
-            backgroundColorPreference.setEnabled(SettingsService.COLOR_THEME_CUSTOM.equals(value));
         }
         settingsService.reloadSettings(this.getApplicationContext());
     }
 
 
     public void setLocale(String lang) {
-        SettingsService.applyLocale(getBaseContext(), lang);
+        Locale locale2 = new Locale(lang);
+        Locale.setDefault(locale2);
+        Configuration config2 = new Configuration();
+        config2.locale = locale2;
+
+        getBaseContext().getResources().updateConfiguration(config2, null);
         showPreferences();
     }
 
