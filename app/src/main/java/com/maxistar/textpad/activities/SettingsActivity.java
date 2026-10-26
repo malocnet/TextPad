@@ -21,9 +21,10 @@ import android.preference.PreferenceManager;
 
 import com.maxistar.textpad.R;
 import com.maxistar.textpad.ServiceLocator;
-import com.maxistar.textpad.SettingsService;
+import com.maxistar.textpad.service.SettingsService;
 import com.maxistar.textpad.TPStrings;
 import com.maxistar.textpad.service.AlternativeUrlsService;
+import com.maxistar.textpad.service.ThemeService;
 
 public class SettingsActivity extends PreferenceActivity implements OnSharedPreferenceChangeListener {
 
@@ -138,11 +139,21 @@ public class SettingsActivity extends PreferenceActivity implements OnSharedPref
     }
 
     public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
+        if (SettingsService.SETTING_COLOR_THEME_TYPE.equals(key)) {
+            settingsService.reloadSettings(this.getApplicationContext());
+            ThemeService themeService = ServiceLocator.getInstance().getThemeService(this);
+            themeService.applyColorTheme(this);
+            Intent intent = getIntent();
+            finish();
+            startActivity(intent);
+            return;
+        }
         if (SettingsService.SETTING_LANGUAGE.equals(key) ||
             SettingsService.SETTING_FONT.equals(key) ||
             SettingsService.SETTING_BG_COLOR.equals(key) ||
             SettingsService.SETTING_FONT_COLOR.equals(key) ||
-            SettingsService.SETTING_FONT_SIZE.equals(key)
+            SettingsService.SETTING_FONT_SIZE.equals(key) ||
+            SettingsService.SETTING_COLOR_THEME_TYPE.equals(key)  // ← thêm dòng này
         ) {
             String lang = sharedPreferences.getString(SettingsService.SETTING_LANGUAGE, TPStrings.EN);
             setLocale(lang);

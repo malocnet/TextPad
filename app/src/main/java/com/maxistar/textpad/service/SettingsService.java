@@ -1,5 +1,5 @@
 package com.maxistar.textpad.service;
-
+import com.maxistar.textpad.service.SettingsService;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;

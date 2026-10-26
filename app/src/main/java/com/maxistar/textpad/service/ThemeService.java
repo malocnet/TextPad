@@ -18,37 +18,22 @@ public class ThemeService {
         String theme = settingsService.getColorThemeType();
         if (SettingsService.COLOR_THEME_DARK.equals(theme)) {
             applyDarkTheme(context);
-        }
-        if (SettingsService.COLOR_THEME_LIGHT.equals(theme)) {
+        } else if (SettingsService.COLOR_THEME_LIGHT.equals(theme)) {
             applyLightTheme(context);
+        } else {
+            applyAutoTheme(context);
         }
+    }
+
+    private void applyAutoTheme(Context context) {
+        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM);
     }
 
     private void applyDarkTheme(Context context) {
-
-        UiModeManager uiManager = (UiModeManager) context.getSystemService(Context.UI_MODE_SERVICE);
-        if (android.os.Build.VERSION.SDK_INT <= Build.VERSION_CODES.LOLLIPOP_MR1) {
-            uiManager.enableCarMode(0);
-        }
-
-        if (android.os.Build.VERSION.SDK_INT <= Build.VERSION_CODES.R) {
-            AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES);
-        } else {
-            uiManager.setNightMode(UiModeManager.MODE_NIGHT_YES);
-        }
+        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES);
     }
 
     private void applyLightTheme(Context context) {
-
-        UiModeManager uiManager = (UiModeManager) context.getSystemService(Context.UI_MODE_SERVICE);
-        if (android.os.Build.VERSION.SDK_INT <= Build.VERSION_CODES.LOLLIPOP_MR1) {
-            uiManager.enableCarMode(0);
-        }
-
-        if (android.os.Build.VERSION.SDK_INT <= Build.VERSION_CODES.R) {
-            AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO);
-        } else {
-            uiManager.setNightMode(UiModeManager.MODE_NIGHT_NO);
-        }
+        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO);
     }
 }
