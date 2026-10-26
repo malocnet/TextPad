@@ -374,6 +374,9 @@ public class EditorActivity extends AppCompatActivity {
         recoveryRepository.cleanupIncompleteArtifacts();
         recoveryWriter = new RecoveryWriter(recoveryRepository);
 
+        ThemeService themeService = ServiceLocator.getInstance().getThemeService(this);
+        themeService.applyColorTheme(this);
+
         if (simpleScrolling()) {
             setContentView(R.layout.main_simple_scrolling);
         } else {
