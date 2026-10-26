@@ -68,14 +68,6 @@ jobs:
             --merge-commit "$MERGE_COMMIT" \
             --merged "$MERGED" > release-candidate.json
           echo "tag=$(python3 -c 'import json; print(json.load(open("release-candidate.json"))["tag"])')" >> "$GITHUB_OUTPUT"
-      - name: Decode Google Play service account
-        env:
-          SERVICE_ACCOUNT_BASE64: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT }}
-        run: printf '%s' "$SERVICE_ACCOUNT_BASE64" | base64 --decode > service-account.json
-      - name: Repeat repository and Google Play validation
-        run: >-
-          python3 scripts/release_tool.py validate --skip-branch --check-play
-          --service-account service-account.json
       - name: Create immutable annotated tag
         env:
           TAG: ${{ steps.identity.outputs.tag }}
@@ -97,13 +89,6 @@ jobs:
   sync-development:
     needs: [create-tag, publish]
     uses: ./.github/workflows/sync-master-to-dev.yml
-    with:
-      tag: ${{ needs.create-tag.outputs.tag }}
-    secrets: inherit
-
-  promote-production:
-    needs: [create-tag, publish]
-    uses: ./.github/workflows/promote-production.yml
     with:
       tag: ${{ needs.create-tag.outputs.tag }}
     secrets: inherit
