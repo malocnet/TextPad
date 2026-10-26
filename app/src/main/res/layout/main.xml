@@ -28,6 +28,7 @@
             android:inputType="textMultiLine|textAutoComplete|textAutoCorrect"
             android:minLines="10"
             android:padding="5dp"
+            android:textColorHint="@color/hint_color"
             android:saveEnabled="false" />
     </ScrollView>
 </LinearLayout>
