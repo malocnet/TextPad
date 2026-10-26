@@ -721,14 +721,10 @@ public class EditorActivity extends AppCompatActivity {
                 setFilename(data.getStringExtra(TPStrings.RESULT_PATH));
                 nextSaveCreatesDocument = true;
                 this.saveFileWithConfirmation();
-            } else if (resultCode == Activity.RESULT_CANCELED) {
-                showToast(R.string.Operation_Canceled);
             }
         } else if (requestCode == REQUEST_OPEN) {
             if (resultCode == Activity.RESULT_OK) {
                 this.openNamedFileLegacy(data.getStringExtra(TPStrings.RESULT_PATH));
-            } else if (resultCode == Activity.RESULT_CANCELED) {
-                showToast(R.string.Operation_Canceled);
             }
         } else if (requestCode == REQUEST_SETTINGS) {
             applyPreferences();
@@ -1097,7 +1093,6 @@ public class EditorActivity extends AppCompatActivity {
             } else {
                 this.openNamedFileLegacy(settingsService.getLastFilename());
             }
-            showToast(formatString(R.string.opened_last_edited_file, settingsService.getLastFilename()));
         } else {
             offerActiveUntitledRecovery();
         }
@@ -1319,7 +1314,7 @@ public class EditorActivity extends AppCompatActivity {
     public boolean onPrepareOptionsMenu(Menu menu) {
         MenuItem searchItem = menu.findItem(R.id.menu_document_search);
         if (searchItem.isActionViewExpanded()) searchItem.collapseActionView();
-        menu.findItem(R.id.menu_discard_draft).setVisible(isTempFile);
+        menu.findItem(R.id.menu_discard_draft).setVisible(isTempFile || changed);
         menu.findItem(R.id.menu_edit_undo).setEnabled(editTextUndoRedo.getCanUndo());
         menu.findItem(R.id.menu_edit_redo).setEnabled(editTextUndoRedo.getCanRedo());
         menu.findItem(R.id.menu_document_go_to).setEnabled(mText.length() > 0);
@@ -1419,16 +1414,28 @@ public class EditorActivity extends AppCompatActivity {
     }
 
     private void discardDraft() {
-        new AlertDialog.Builder(this)
-            .setTitle("Discard Draft")
-            .setMessage("Delete this draft permanently?")
-            .setPositiveButton(R.string.Yes, (dialog, which) -> {
-                deleteTempFile();
-                discardCurrentRecovery();
-                clearFile();
-            })
-            .setNegativeButton(R.string.No, null)
-            .show();
+        if (isTempFile) {
+            new AlertDialog.Builder(this)
+                .setTitle("Discard Draft")
+                .setMessage("Delete this draft permanently?")
+                .setPositiveButton(R.string.Yes, (dialog, which) -> {
+                    deleteTempFile();
+                    discardCurrentRecovery();
+                    clearFile();
+                })
+                .setNegativeButton(R.string.No, null)
+                .show();
+        } else {
+            new AlertDialog.Builder(this)
+                .setTitle("Discard Changes")
+                .setMessage("Reload file and lose all unsaved changes?")
+                .setPositiveButton(R.string.Yes, (dialog, which) -> {
+                    discardCurrentRecovery();
+                    loadStoredDocumentAfterDiscard();
+                })
+                .setNegativeButton(R.string.No, null)
+                .show();
+        }
     }
 
     private void shareText() {
@@ -1768,9 +1775,6 @@ public class EditorActivity extends AppCompatActivity {
             dis.close(); fis.close();
             String ttt = toUnixEndings(new String(b, settingsService.getFileEncoding()));
             setEditorText(ttt, false);
-            if (!suppressOpenToast) {
-                showToast(getBaseContext().getResources().getString(R.string.File_opened_, filename));
-            }
             suppressOpenToast = false;
             initEditor();
             Uri fileUri = Uri.fromFile(new File(filename));
@@ -1813,9 +1817,6 @@ public class EditorActivity extends AppCompatActivity {
             String ttt = toUnixEndings(new String(b, settingsService.getFileEncoding()));
             inputStream.close();
             setEditorText(ttt, false);
-            if (!suppressOpenToast) {
-                showToast(getBaseContext().getResources().getString(R.string.File_opened_, getFilename()));
-            }
             suppressOpenToast = false;
             initEditor();
             boolean isTemp = isFileInTextPadDir(uri) && isNewfileName(uri);
