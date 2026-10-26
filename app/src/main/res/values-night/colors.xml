@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="colorPrimary">#3E425C</color>
-    <color name="textColorPrimary">#000000</color>
+    <color name="colorPrimary">#3F51B5</color>
+    <color name="colorPrimaryDark">#303F9F</color>
+    <color name="colorAccent">#404081</color>
+    <color name="colorIcon">#7F7F7F</color>
+    <color name="textMenuColor">#7F7F7F</color>
+    <color name="appBackground">#212121</color>
+    <color name="appTextPrimary">#FFFFFF</color>
+    <color name="hint_color">#7F7F7F</color>
 </resources>

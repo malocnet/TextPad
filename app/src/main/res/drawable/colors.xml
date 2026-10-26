@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="spectrum_red_start">#FF0000</color>
+    <color name="spectrum_magenta">#FF00FF</color>
+    <color name="spectrum_blue">#0000FF</color>
+    <color name="spectrum_cyan">#00FFFF</color>
+    <color name="spectrum_green">#00FF00</color>
+    <color name="spectrum_yellow">#FFFF00</color>
+    <color name="spectrum_red_end">#FF0000</color> 
+    <color name="spectrum_white">#FFFFFF</color>
+    <color name="spectrum_black">#000000</color>
+</resources>

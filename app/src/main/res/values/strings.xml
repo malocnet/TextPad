@@ -138,9 +138,6 @@
     <string name="replaced_all">Replaced all occurrences</string>
     <string name="text_not_found">Text not found</string>
 
-    <string name="permission_storage_title">Storage Permission Required</string>
-    <string name="permission_storage_message">TextPad needs access to all files to save to Documents/TextPad. Please grant permission in Settings.</string>
-    <string name="permission_storage_button">Open Settings</string>
     <string name="discard_draft">Discard Draft</string>
     <string name="discard_draft_message">Delete this draft permanently?</string>
     <string name="Drafts">Drafts</string>
