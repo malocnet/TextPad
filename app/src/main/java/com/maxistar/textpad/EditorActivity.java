@@ -1380,9 +1380,89 @@ public class EditorActivity extends AppCompatActivity {
         } else if (itemId == R.id.menu_document_print)            { printText();
         } else if (itemId == R.id.menu_document_settings)         { showSettings();
         } else if (itemId == R.id.menu_discard_draft)             { discardDraft();
+        } else if (itemId == R.id.action_cut)                     { mText.onTextContextMenuItem(android.R.id.cut);
+        } else if (itemId == R.id.action_copy)                    { mText.onTextContextMenuItem(android.R.id.copy);
+        } else if (itemId == R.id.action_paste)                   { mText.onTextContextMenuItem(android.R.id.paste);
+        } else if (itemId == R.id.action_select_all)              { mText.selectAll();
+        } else if (itemId == R.id.action_share)                   { shareText();
+        } else if (itemId == R.id.action_clipboard)               { showClipboardDialog();
+        } else if (itemId == R.id.action_extend_up_1)             { extendSelection(-1);
+        } else if (itemId == R.id.action_extend_down_1)           { extendSelection(1);
+        } else if (itemId == R.id.action_extend_up_5)             { extendSelection(-5);
+        } else if (itemId == R.id.action_extend_down_5)           { extendSelection(5);
         } else if (itemId == R.id.menu_exit)                      { exitApplication();
         }
         return super.onOptionsItemSelected(item);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Editor menu
+    // ─────────────────────────────────────────────────────────────
+
+    private void showClipboardDialog() {
+        android.content.ClipboardManager clipboard =
+                (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        if (clipboard == null || !clipboard.hasPrimaryClip()) {
+            showToast("Clipboard is empty");
+            return;
+        }
+        android.content.ClipData clip = clipboard.getPrimaryClip();
+        if (clip == null || clip.getItemCount() == 0) {
+            showToast("Clipboard is empty");
+            return;
+        }
+        CharSequence text = clip.getItemAt(0).coerceToText(this);
+        String preview = text.length() > 300
+                ? text.subSequence(0, 300).toString() + "…"
+                : text.toString();
+
+        new AlertDialog.Builder(this)
+                .setTitle("Clipboard")
+                .setMessage(preview)
+                .setPositiveButton("Paste", (dialog, which) ->
+                        mText.onTextContextMenuItem(android.R.id.paste))
+                .setNegativeButton(R.string.Cancel, null)
+                .show();
+    }
+
+    private void extendSelection(int lines) {
+        android.text.Layout layout = mText.getLayout();
+        if (layout == null) return;
+
+        int selStart = mText.getSelectionStart();
+        int selEnd   = mText.getSelectionEnd();
+        int textLength = mText.getText().length();
+
+        if (lines > 0) {
+            int currentLine = layout.getLineForOffset(selEnd);
+            int targetLine  = Math.min(currentLine + lines, layout.getLineCount() - 1);
+            int newSelEnd   = Math.min(layout.getLineEnd(targetLine), textLength);
+            mText.setSelection(selStart, newSelEnd);
+            scrollToOffset(newSelEnd);
+        } else {
+            int currentLine  = layout.getLineForOffset(selStart);
+            int targetLine   = Math.max(currentLine + lines, 0);
+            int newSelStart  = layout.getLineStart(targetLine);
+            mText.setSelection(newSelStart, selEnd);
+            scrollToOffset(newSelStart);
+        }
+    }
+
+    private void scrollToOffset(int offset) {
+        if (mText.getLayout() == null) return;
+        int line       = mText.getLayout().getLineForOffset(offset);
+        int lineTop    = mText.getLayout().getLineTop(line);
+        int lineBottom = mText.getLayout().getLineBottom(line);
+
+        if (simpleScrolling()) {
+            mText.scrollTo(0, Math.max(0, lineTop - mText.getHeight() / 2));
+        } else {
+            if (scrollView == null) return;
+            scrollView.requestChildRectangleOnScreen(
+                    mText,
+                    new Rect(0, lineTop, mText.getWidth(), lineBottom),
+                    false);
+        }
     }
 
     private void printText() {

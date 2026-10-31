@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="action_cut"           type="id" />
+    <item name="action_copy"          type="id" />
+    <item name="action_paste"         type="id" />
+    <item name="action_select_all"    type="id" />
+    <item name="action_share"         type="id" />
+    <item name="action_clipboard"     type="id" />
+    <item name="action_extend_up_1"   type="id" />
+    <item name="action_extend_down_1" type="id" />
+    <item name="action_extend_up_5"   type="id" />
+    <item name="action_extend_down_5" type="id" />
+</resources>
