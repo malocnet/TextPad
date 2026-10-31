@@ -9,27 +9,27 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 public class TextConverterTest {
 
-    @org.junit.jupiter.api.Test
+    @Test
     public void getInstance() {
         TextConverter converter = TextConverter.getInstance();
         assertNotNull(converter, "Should return instance");
     }
 
-    @org.junit.jupiter.api.Test
+    @Test
     public void applyDefaultEndings() {
         TextConverter converter = TextConverter.getInstance();
         String result = converter.applyEndings("\n\r\n", TPStrings.DEFAULT);
         assertEquals("\n\r\n", result);
     }
 
-    @org.junit.jupiter.api.Test
+    @Test
     public void applyWindowsEndings() {
         TextConverter converter = TextConverter.getInstance();
         String result = converter.applyEndings("\n\n", TextConverter.WINDOWS);
         assertEquals("\r\n\r\n", result);
     }
 
-    @org.junit.jupiter.api.Test
+    @Test
     public void applyUnixEndings() {
         TextConverter converter = TextConverter.getInstance();
         String result = converter.applyEndings("\r\n\r\n", TextConverter.UNIX);
