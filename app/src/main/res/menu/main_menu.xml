@@ -120,6 +120,11 @@
         app:showAsAction="never" />
 
     <item
+        android:id="@+id/menu_html_preview"
+        android:title="HTML Preview"
+        app:showAsAction="never" />
+
+    <item
         android:id="@+id/menu_file_info"
         android:title="File Info"
         android:icon="@drawable/ic_info"

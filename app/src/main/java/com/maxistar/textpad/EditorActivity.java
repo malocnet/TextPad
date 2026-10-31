@@ -1212,9 +1212,7 @@ public class EditorActivity extends AppCompatActivity {
     }
 
     private void showMarkdownPreview() {
-        String mdContent = mText.getText().toString();
-
-        String escaped = mdContent
+        String escaped = mText.getText().toString()
                 .replace("\\", "\\\\")
                 .replace("`", "\\`")
                 .replace("$", "\\$");
@@ -1224,28 +1222,21 @@ public class EditorActivity extends AppCompatActivity {
                 + "<meta name='viewport' content='width=device-width, initial-scale=1'>"
                 + "<script src='file:///android_asset/marked/marked.min.js'></script>"
                 + "<style>"
-                + "body { font-family: sans-serif; padding: 16px; line-height: 1.6;"
-                + "  color: #222; word-wrap: break-word; }"
-                + "pre { position: relative; background: #f5f5f5; padding: 12px;"
-                + "  padding-top: 36px; border-radius: 4px; overflow-x: auto;"
-                + "  white-space: pre; }"
-                + "code { font-family: monospace; background: #f0f0f0;"
-                + "  padding: 2px 4px; border-radius: 3px; }"
+                + "body { font-family: sans-serif; padding: 16px; line-height: 1.6; color: #222; word-wrap: break-word; }"
+                + "pre { position: relative; background: #f5f5f5; padding: 12px; padding-top: 36px;"
+                + "  border-radius: 4px; overflow-x: auto; white-space: pre; }"
+                + "code { font-family: monospace; background: #f0f0f0; padding: 2px 4px; border-radius: 3px; }"
                 + "pre code { background: none; padding: 0; white-space: inherit; }"
-                + "blockquote { border-left: 4px solid #ccc; margin: 0;"
-                + "  padding-left: 16px; color: #666; }"
+                + "blockquote { border-left: 4px solid #ccc; margin: 0; padding-left: 16px; color: #666; }"
                 + "table { border-collapse: collapse; width: 100%; }"
                 + "th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }"
                 + "th { background: #f0f0f0; }"
                 + "img { max-width: 100%; }"
                 + "hr { border: none; border-top: 1px solid #ddd; }"
-                + ".copy-btn {"
-                + "  position: absolute; top: 6px; right: 8px;"
-                + "  padding: 2px 10px; font-size: 12px; cursor: pointer;"
-                + "  background: #e0e0e0; border: none; border-radius: 4px;"
-                + "  color: #333; font-family: sans-serif; }"
-                + ".copy-btn.copied {"
-                + "  background: #4caf50; color: #fff; }"
+                + ".copy-btn { position: absolute; top: 6px; right: 8px; padding: 2px 10px;"
+                + "  font-size: 12px; cursor: pointer; background: #e0e0e0; border: none;"
+                + "  border-radius: 4px; color: #333; font-family: sans-serif; }"
+                + ".copy-btn.copied { background: #4caf50; color: #fff; }"
                 + "</style></head><body>"
                 + "<div id='content'></div>"
                 + "<script>"
@@ -1253,44 +1244,39 @@ public class EditorActivity extends AppCompatActivity {
                 + "  document.getElementById('content').innerHTML = marked.parse(`" + escaped + "`);"
                 + "} catch(e) {"
                 + "  document.getElementById('content').innerHTML = '<pre style=\"color:red\">' + e.message + '</pre>';"
-                + "}"                + "document.querySelectorAll('pre').forEach(function(pre) {"
+                + "}"
+                + "document.querySelectorAll('pre').forEach(function(pre) {"
                 + "  var btn = document.createElement('button');"
-                + "  btn.className = 'copy-btn';"
-                + "  btn.textContent = 'Copy';"
+                + "  btn.className = 'copy-btn'; btn.textContent = 'Copy';"
                 + "  btn.addEventListener('click', function() {"
                 + "    var code = pre.querySelector('code');"
                 + "    var text = code ? code.innerText : pre.innerText;"
                 + "    if (navigator.clipboard && navigator.clipboard.writeText) {"
                 + "      navigator.clipboard.writeText(text).then(function() {"
-                + "        btn.textContent = 'Copied!';"
-                + "        btn.classList.add('copied');"
-                + "        setTimeout(function() {"
-                + "          btn.textContent = 'Copy';"
-                + "          btn.classList.remove('copied');"
-                + "        }, 1500);"
+                + "        btn.textContent = 'Copied!'; btn.classList.add('copied');"
+                + "        setTimeout(function() { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);"
                 + "      });"
                 + "    } else {"
                 + "      var ta = document.createElement('textarea');"
-                + "      ta.value = text;"
-                + "      ta.style.position = 'fixed';"
-                + "      ta.style.opacity = '0';"
-                + "      document.body.appendChild(ta);"
-                + "      ta.focus(); ta.select();"
-                + "      document.execCommand('copy');"
-                + "      document.body.removeChild(ta);"
-                + "      btn.textContent = 'Copied!';"
-                + "      btn.classList.add('copied');"
-                + "      setTimeout(function() {"
-                + "        btn.textContent = 'Copy';"
-                + "        btn.classList.remove('copied');"
-                + "      }, 1500);"
+                + "      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';"
+                + "      document.body.appendChild(ta); ta.focus(); ta.select();"
+                + "      document.execCommand('copy'); document.body.removeChild(ta);"
+                + "      btn.textContent = 'Copied!'; btn.classList.add('copied');"
+                + "      setTimeout(function() { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);"
                 + "    }"
                 + "  });"
                 + "  pre.appendChild(btn);"
                 + "});"
-                + "</script>"
-                + "</body></html>";
+                + "</script></body></html>";
 
+        showPreviewDialog(html, "Markdown Preview");
+    }
+
+    private void showHtmlPreview() {
+        showPreviewDialog(mText.getText().toString(), "HTML Preview");
+    }
+
+    private void showPreviewDialog(String html, String title) {
         WebView wv = new WebView(this);
         wv.getSettings().setJavaScriptEnabled(true);
         wv.getSettings().setAllowFileAccessFromFileURLs(true);
@@ -1298,7 +1284,7 @@ public class EditorActivity extends AppCompatActivity {
         wv.loadDataWithBaseURL("file:///android_asset/", html, "text/html", "UTF-8", null);
 
         new AlertDialog.Builder(this)
-                .setTitle("Markdown Preview — " + currentDisplayName())
+                .setTitle(title + " — " + currentDisplayName())
                 .setView(wv)
                 .setPositiveButton("Close", null)
                 .show();
@@ -1540,9 +1526,16 @@ public class EditorActivity extends AppCompatActivity {
             menu.findItem(R.id.menu_document_print).setVisible(false);
         }
 
+        String ext = getFileExtension(urlFilename);
+
         MenuItem mdPreview = menu.findItem(R.id.menu_md_preview);
         if (mdPreview != null) {
-            mdPreview.setVisible("md".equals(getFileExtension(urlFilename)));
+            mdPreview.setVisible("md".equals(ext));
+        }
+
+        MenuItem htmlPreview = menu.findItem(R.id.menu_html_preview);
+        if (htmlPreview != null) {
+            htmlPreview.setVisible("html".equals(ext) || "htm".equals(ext));
         }
         return true;
     }
@@ -1601,6 +1594,7 @@ public class EditorActivity extends AppCompatActivity {
         } else if (itemId == R.id.menu_discard_draft)             { discardDraft();
         } else if (itemId == R.id.menu_file_info)                 { showFileInfoDialog();
         } else if (itemId == R.id.menu_md_preview)                { showMarkdownPreview();
+        } else if (itemId == R.id.menu_html_preview)              { showHtmlPreview();        
         } else if (itemId == R.id.action_cut)                     { mText.onTextContextMenuItem(android.R.id.cut);
         } else if (itemId == R.id.action_copy)                    { mText.onTextContextMenuItem(android.R.id.copy);
         } else if (itemId == R.id.action_paste)                   { mText.onTextContextMenuItem(android.R.id.paste);
