@@ -537,6 +537,7 @@ public class EditorActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        readOnlyHandler.removeCallbacks(readOnlyRunnable);
         if (isTempFile && changed) {
             String content = mText.getText().toString();
             if (content.trim().isEmpty()) {
@@ -1922,14 +1923,24 @@ public class EditorActivity extends AppCompatActivity {
         } catch (Exception e) {  this.showToast(R.string.Can_not_read_file); }
     }
 
+    private final Handler readOnlyHandler = new Handler();
+    private final Runnable readOnlyRunnable = this::showReadOnlyDialog;
+
     private void detectReadOnlyAccess(final Uri uri) {
+        readOnlyHandler.removeCallbacks(readOnlyRunnable);
         boolean isReadOnly = false;
         try {
-            ParcelFileDescriptor pfdWrite = getContentResolver().openFileDescriptor(uri, "rw");
+            ParcelFileDescriptor pfdWrite =
+                getContentResolver().openFileDescriptor(uri, "rw");
             if (pfdWrite == null) isReadOnly = true;
             else pfdWrite.close();
-        } catch (Exception e) { isReadOnly = true; }
-        if (isReadOnly) new Handler().postDelayed(this::showReadOnlyDialog, 1000);
+        } catch (Exception e) {
+            isReadOnly = true;
+        }
+
+        if (isReadOnly) {
+            readOnlyHandler.postDelayed(readOnlyRunnable, 1000);
+        }
     }
 
     public void showReadOnlyDialog() {
