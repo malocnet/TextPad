@@ -1059,6 +1059,32 @@ public class EditorActivity extends AppCompatActivity {
         return new File(urlFilename).getName();
     }
 
+    private String getFileExtension(String filename) {
+        if (filename == null || filename.isEmpty()) return "";
+        String name = "";
+        try {
+            Uri uri = Uri.parse(filename);
+            // Try to get display name from ContentResolver for content:// URIs
+            if ("content".equals(uri.getScheme())) {
+                android.database.Cursor cursor = getContentResolver().query(
+                        uri,
+                        new String[]{android.provider.OpenableColumns.DISPLAY_NAME},
+                        null, null, null);
+                if (cursor != null && cursor.moveToFirst()) {
+                    name = cursor.getString(0);
+                    cursor.close();
+                }
+            } else {
+                String path = uri.getPath();
+                name = path != null ? new File(path).getName() : filename;
+            }
+        } catch (Exception e) {
+            name = filename;
+        }
+        int dot = name.lastIndexOf('.');
+        return dot >= 0 ? name.substring(dot + 1).toLowerCase(Locale.US) : "";
+    }
+
     private void recordLoadedDocument(byte[] originalBytes, Long lastModified) {
         originalSize = (long) originalBytes.length;
         originalLastModified = lastModified;
@@ -1183,6 +1209,193 @@ public class EditorActivity extends AppCompatActivity {
             searchView.setOnQueryTextListener(getQueryTextListener());
             searchItem.setOnActionExpandListener(getQueryTextListener());
         }
+    }
+
+    private void showMarkdownPreview() {
+        String mdContent = mText.getText().toString();
+
+        String escaped = mdContent
+                .replace("\\", "\\\\")
+                .replace("`", "\\`")
+                .replace("$", "\\$");
+
+        String html = "<!DOCTYPE html><html><head>"
+                + "<meta charset='UTF-8'>"
+                + "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+                + "<script src='file:///android_asset/marked/marked.min.js'></script>"
+                + "<style>"
+                + "body { font-family: sans-serif; padding: 16px; line-height: 1.6;"
+                + "  color: #222; word-wrap: break-word; }"
+                + "pre { position: relative; background: #f5f5f5; padding: 12px;"
+                + "  padding-top: 36px; border-radius: 4px; overflow-x: auto;"
+                + "  white-space: pre; }"
+                + "code { font-family: monospace; background: #f0f0f0;"
+                + "  padding: 2px 4px; border-radius: 3px; }"
+                + "pre code { background: none; padding: 0; white-space: inherit; }"
+                + "blockquote { border-left: 4px solid #ccc; margin: 0;"
+                + "  padding-left: 16px; color: #666; }"
+                + "table { border-collapse: collapse; width: 100%; }"
+                + "th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }"
+                + "th { background: #f0f0f0; }"
+                + "img { max-width: 100%; }"
+                + "hr { border: none; border-top: 1px solid #ddd; }"
+                + ".copy-btn {"
+                + "  position: absolute; top: 6px; right: 8px;"
+                + "  padding: 2px 10px; font-size: 12px; cursor: pointer;"
+                + "  background: #e0e0e0; border: none; border-radius: 4px;"
+                + "  color: #333; font-family: sans-serif; }"
+                + ".copy-btn.copied {"
+                + "  background: #4caf50; color: #fff; }"
+                + "</style></head><body>"
+                + "<div id='content'></div>"
+                + "<script>"
+                + "try {"
+                + "  document.getElementById('content').innerHTML = marked.parse(`" + escaped + "`);"
+                + "} catch(e) {"
+                + "  document.getElementById('content').innerHTML = '<pre style=\"color:red\">' + e.message + '</pre>';"
+                + "}"                + "document.querySelectorAll('pre').forEach(function(pre) {"
+                + "  var btn = document.createElement('button');"
+                + "  btn.className = 'copy-btn';"
+                + "  btn.textContent = 'Copy';"
+                + "  btn.addEventListener('click', function() {"
+                + "    var code = pre.querySelector('code');"
+                + "    var text = code ? code.innerText : pre.innerText;"
+                + "    if (navigator.clipboard && navigator.clipboard.writeText) {"
+                + "      navigator.clipboard.writeText(text).then(function() {"
+                + "        btn.textContent = 'Copied!';"
+                + "        btn.classList.add('copied');"
+                + "        setTimeout(function() {"
+                + "          btn.textContent = 'Copy';"
+                + "          btn.classList.remove('copied');"
+                + "        }, 1500);"
+                + "      });"
+                + "    } else {"
+                + "      var ta = document.createElement('textarea');"
+                + "      ta.value = text;"
+                + "      ta.style.position = 'fixed';"
+                + "      ta.style.opacity = '0';"
+                + "      document.body.appendChild(ta);"
+                + "      ta.focus(); ta.select();"
+                + "      document.execCommand('copy');"
+                + "      document.body.removeChild(ta);"
+                + "      btn.textContent = 'Copied!';"
+                + "      btn.classList.add('copied');"
+                + "      setTimeout(function() {"
+                + "        btn.textContent = 'Copy';"
+                + "        btn.classList.remove('copied');"
+                + "      }, 1500);"
+                + "    }"
+                + "  });"
+                + "  pre.appendChild(btn);"
+                + "});"
+                + "</script>"
+                + "</body></html>";
+
+        WebView wv = new WebView(this);
+        wv.getSettings().setJavaScriptEnabled(true);
+        wv.getSettings().setAllowFileAccessFromFileURLs(true);
+        wv.setWebChromeClient(new android.webkit.WebChromeClient());
+        wv.loadDataWithBaseURL("file:///android_asset/", html, "text/html", "UTF-8", null);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Markdown Preview — " + currentDisplayName())
+                .setView(wv)
+                .setPositiveButton("Close", null)
+                .show();
+    }
+
+    private void showFileInfoDialog() {
+        StringBuilder info = new StringBuilder();
+
+        // Tên file
+        String displayName = currentDisplayName();
+        info.append("Name: ").append(displayName).append("\n\n");
+
+        // Đường dẫn & thư mục
+        if (!isFilenameEmpty()) {
+            if (useAndroidManager()) {
+                info.append("URI:\n").append(urlFilename).append("\n\n");
+            } else {
+                File f = new File(urlFilename);
+                info.append("Path:\n").append(f.getAbsolutePath()).append("\n\n");
+                info.append("Folder:\n").append(f.getParent()).append("\n\n");
+            }
+        }
+
+        // Kích thước
+        if (originalSize != null) {
+            String size;
+            if (originalSize < 1024) size = originalSize + " B";
+            else if (originalSize < 1024 * 1024) size = String.format(Locale.US, "%.1f KB", originalSize / 1024.0);
+            else size = String.format(Locale.US, "%.2f MB", originalSize / (1024.0 * 1024));
+            info.append("Size: ").append(size).append("\n\n");
+        }
+
+        // Ngày chỉnh sửa cuối
+        if (originalLastModified != null) {
+            String date = DateFormat.getDateTimeInstance().format(new Date(originalLastModified));
+            info.append("Last Modified: ").append(date).append("\n\n");
+        }
+
+        // Encoding
+        info.append("Encoding: ").append(settingsService.getFileEncoding()).append("\n\n");
+
+        // Line endings
+        String endings = settingsService.getDelimiters();
+        if (TextConverter.WINDOWS.equals(endings)) endings = "Windows (CRLF)";
+        else if (TextConverter.UNIX.equals(endings)) endings = "Unix (LF)";
+        else if (TextConverter.MACOS.equals(endings)) endings = "Mac (CR)";
+        else endings = "Default";
+        info.append("Line Endings: ").append(endings).append("\n\n");
+
+        // Số dòng, ký tự, từ
+        String content = mText.getText().toString();
+        int lines = content.isEmpty() ? 0 : content.split("\n", -1).length;
+        int chars = content.length();
+        int words = content.trim().isEmpty() ? 0 : content.trim().split("\\s+").length;
+        info.append("Lines: ").append(lines).append("\n");
+        info.append("Words: ").append(words).append("\n");
+        info.append("Characters: ").append(chars).append("\n\n");
+
+        // Trạng thái
+        info.append("Status: ");
+        if (isTempFile) info.append("Draft");
+        else if (changed) info.append("Modified (unsaved)");
+        else info.append("Saved");
+        info.append("\n\n");
+
+        // Read-only status
+        boolean isReadOnly = false;
+        if (!isFilenameEmpty()) {
+            try {
+                Uri checkUri = Uri.parse(urlFilename);
+                ParcelFileDescriptor pfd = getContentResolver().openFileDescriptor(checkUri, "rw");
+                if (pfd == null) isReadOnly = true;
+                else pfd.close();
+            } catch (Exception e) {
+                isReadOnly = true;
+            }
+        }
+        info.append("Access: ").append(isReadOnly ? "Read-only" : "Read-write").append("\n\n");
+
+        // SHA-256
+        if (originalContentSha256 != null) {
+            info.append("SHA-256:\n").append(originalContentSha256);
+        }
+
+        TextView tv = new TextView(this);
+        tv.setText(info.toString());
+        tv.setTextIsSelectable(true); // cho phép copy SHA-256
+        tv.setPadding(48, 24, 48, 24);
+
+        ScrollView sv = new ScrollView(this);
+        sv.addView(tv);
+
+        new AlertDialog.Builder(this)
+                .setTitle("File Info")
+                .setView(sv)
+                .setPositiveButton("OK", null)
+                .show();
     }
 
     private String lastSearchQuery = "";
@@ -1326,6 +1539,11 @@ public class EditorActivity extends AppCompatActivity {
         if (android.os.Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
             menu.findItem(R.id.menu_document_print).setVisible(false);
         }
+
+        MenuItem mdPreview = menu.findItem(R.id.menu_md_preview);
+        if (mdPreview != null) {
+            mdPreview.setVisible("md".equals(getFileExtension(urlFilename)));
+        }
         return true;
     }
 
@@ -1381,6 +1599,8 @@ public class EditorActivity extends AppCompatActivity {
         } else if (itemId == R.id.menu_document_print)            { printText();
         } else if (itemId == R.id.menu_document_settings)         { showSettings();
         } else if (itemId == R.id.menu_discard_draft)             { discardDraft();
+        } else if (itemId == R.id.menu_file_info)                 { showFileInfoDialog();
+        } else if (itemId == R.id.menu_md_preview)                { showMarkdownPreview();
         } else if (itemId == R.id.action_cut)                     { mText.onTextContextMenuItem(android.R.id.cut);
         } else if (itemId == R.id.action_copy)                    { mText.onTextContextMenuItem(android.R.id.copy);
         } else if (itemId == R.id.action_paste)                   { mText.onTextContextMenuItem(android.R.id.paste);
@@ -1871,6 +2091,7 @@ public class EditorActivity extends AppCompatActivity {
             if (!settingsService.getLastFilename().equals(filename))
                 settingsService.setLastFilename(filename, this.getApplicationContext());
             updateTitle();
+            detectReadOnlyAccess(fileUri);
         } catch (FileNotFoundException e) { this.showToast(R.string.File_not_found);
         } catch (IOException e) { this.showToast(R.string.Can_not_read_file);
         } catch (Exception e) { this.showToast(R.string.Can_not_read_file); }

@@ -115,6 +115,17 @@
     </item>
 
     <item
+        android:id="@+id/menu_md_preview"
+        android:title="Markdown Preview"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/menu_file_info"
+        android:title="File Info"
+        android:icon="@drawable/ic_info"
+        app:iconTint="@color/colorIcon" />
+
+    <item
         android:id="@+id/menu_document_share"
         android:title="@string/Menu_Share"
         android:icon="@drawable/ic_share"
